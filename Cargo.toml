@@ -1,0 +1,28 @@
+[package]
+name = "oracle-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Tabularis driver plugin for Oracle Database (via ODPI-C / Oracle Instant Client)"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+name = "oracle_plugin"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oracle-plugin"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+# Oracle driver built on ODPI-C: the C sources are bundled and compiled at
+# build time (no Oracle SDK needed), and the Oracle Client library (e.g.
+# Instant Client) is loaded dynamically at runtime on first connect.
+oracle = "0.6"
+base64 = "0.22"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

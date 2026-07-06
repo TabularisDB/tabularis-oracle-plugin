@@ -1,0 +1,29 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lockfile — ignored to match the tabularis plugin template convention.
+# (For a binary crate, committing it is also a reasonable choice.)
+Cargo.lock
+
+# Packaged plugin archives (produced by CI / manual packaging)
+*.zip
+/staging/
+
+# Editors & IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local scratch / env
+*.log
+.env
+.env.*
