@@ -29,6 +29,26 @@ package and make it findable in one of two ways:
    (Settings → Installed Plugins → Oracle → gear icon) to the Instant Client
    folder.
 
+> [!IMPORTANT]
+> On **Linux**, `LD_LIBRARY_PATH` must be set as a **system-wide environment
+> variable**, not in your shell profile: Tabularis launched from the desktop
+> (menu, launcher, `.desktop` file) never reads `.bashrc`/`.zshrc`, so a
+> variable exported there is invisible to it. Set it in `/etc/environment`
+> (`LD_LIBRARY_PATH=/opt/oracle/instantclient_23_5`) or in
+> `~/.config/environment.d/oracle.conf` on systemd desktops, then log out and
+> back in. Alternatively, register the directory with the loader once and skip
+> the variable entirely:
+>
+> ```bash
+> echo /opt/oracle/instantclient_23_5 | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf
+> sudo ldconfig
+> ```
+>
+> The same caveat likely applies to GUI-launched apps on the other platforms
+> (`PATH` on Windows must be the *system* one, and macOS strips
+> `DYLD_LIBRARY_PATH` from GUI apps) — on those, prefer the plugin's
+> **Oracle Client library directory** setting.
+
 If the library cannot be found, connections fail with a clear DPI-1047 hint
 rather than a cryptic loader error.
 
