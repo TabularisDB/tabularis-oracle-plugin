@@ -17,6 +17,9 @@ use serde_json::{json, Value};
 
 use crate::error::PluginError;
 use crate::models::ConnectionParams;
+use crate::utils::json_columns::{
+    is_unsupported_json_error, json_safe_projection, parse_describe, DESCRIBE_COLUMNS_BLOCK,
+};
 
 /// A uniform result shape for the handlers.
 pub struct QueryResult {
@@ -93,7 +96,35 @@ impl Client {
     }
 
     /// Run a row-returning statement (SELECT / WITH).
+    ///
+    /// Statements touching native JSON columns fail at define time inside
+    /// rust-oracle ("unsupported Oracle type JSON"); those are transparently
+    /// retried with the JSON columns serialized to CLOB text (see
+    /// `utils::json_columns`). Any other failure — including a failure of the
+    /// recovery itself — surfaces the original error.
     pub fn query(&self, sql: &str, args: &[Value]) -> Result<QueryResult, PluginError> {
+        match self.query_inner(sql, args) {
+            Err(err) if is_unsupported_json_error(&err.message) => {
+                match self.json_safe_rewrite(sql) {
+                    Ok(Some(rewritten)) => self.query_inner(&rewritten, args),
+                    _ => Err(err),
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// Describe `sql` server-side and, when it selects JSON columns, return
+    /// the equivalent query with those columns wrapped in `JSON_SERIALIZE`.
+    fn json_safe_rewrite(&self, sql: &str) -> Result<Option<String>, PluginError> {
+        let mut stmt = self.conn().statement(DESCRIBE_COLUMNS_BLOCK).build()?;
+        stmt.execute(&[&sql.to_string(), &OracleType::Varchar2(32767)])?;
+        let buf: String = stmt.bind_value(2)?;
+        Ok(json_safe_projection(&parse_describe(&buf))
+            .map(|projection| format!("SELECT {projection} FROM ({sql})")))
+    }
+
+    fn query_inner(&self, sql: &str, args: &[Value]) -> Result<QueryResult, PluginError> {
         let binds = to_binds(args);
         let bind_refs: Vec<&dyn ToSql> = binds.iter().map(|b| b.as_ref()).collect();
 
