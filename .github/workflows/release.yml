@@ -5,9 +5,6 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: ${{ matrix.platform-label }}
@@ -19,32 +16,61 @@ jobs:
           - platform-label: linux-x64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            archive: zip
             binary-suffix: ""
           - platform-label: linux-arm64
             runner: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            archive: zip
             binary-suffix: ""
             cross: true
           - platform-label: darwin-x64
             runner: macos-latest
             target: x86_64-apple-darwin
+            archive: zip
             binary-suffix: ""
           - platform-label: darwin-arm64
             runner: macos-14
             target: aarch64-apple-darwin
+            archive: zip
             binary-suffix: ""
           - platform-label: win-x64
             runner: windows-latest
             target: x86_64-pc-windows-msvc
+            archive: zip
             binary-suffix: ".exe"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Check for UI extension
+        id: ui
+        shell: bash
+        run: |
+          if [ -f ui/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.ui.outputs.present == 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Build UI
+        if: steps.ui.outputs.present == 'true'
+        shell: bash
+        working-directory: ui
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
 
       - name: Install cross (linux-arm64 only)
         if: matrix.cross
@@ -64,7 +90,14 @@ jobs:
           STAGE=staging
           mkdir -p "$STAGE"
           cp target/${{ matrix.target }}/release/oracle-plugin${{ matrix.binary-suffix }} "$STAGE/"
-          cp manifest.json "$STAGE/"
+          cp .tabularium "$STAGE/"
+          if [ -d assets ]; then
+            cp -r assets "$STAGE/"
+          fi
+          if [ -f ui/dist/index.js ]; then
+            mkdir -p "$STAGE/ui/dist"
+            cp ui/dist/index.js "$STAGE/ui/dist/"
+          fi
           (cd "$STAGE" && zip -r ../oracle-plugin-${{ matrix.platform-label }}.zip .)
 
       - name: Package (windows)
@@ -74,10 +107,44 @@ jobs:
           $stage = "staging"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "target\${{ matrix.target }}\release\oracle-plugin${{ matrix.binary-suffix }}" $stage
-          Copy-Item "manifest.json" $stage
+          Copy-Item ".tabularium" $stage
+          if (Test-Path "assets") {
+            Copy-Item -Recurse "assets" "$stage\assets"
+          }
+          if (Test-Path "ui\dist\index.js") {
+            New-Item -ItemType Directory -Force -Path "$stage\ui\dist" | Out-Null
+            Copy-Item "ui\dist\index.js" "$stage\ui\dist"
+          }
           Compress-Archive -Path "$stage\*" -DestinationPath "oracle-plugin-${{ matrix.platform-label }}.zip"
 
-      - name: Upload release asset
+      - name: Stash artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: oracle-plugin-${{ matrix.platform-label }}
+          path: oracle-plugin-${{ matrix.platform-label }}.zip
+          retention-days: 1
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (for the .tabularium manifest asset)
+        uses: actions/checkout@v5
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: oracle-plugin-${{ matrix.platform-label }}.zip
+          # .tabularium ships as a standalone asset: the registry resolves the
+          # manifest from release assets, not the git ref.
+          files: |
+            artifacts/*.zip
+            .tabularium

@@ -111,7 +111,7 @@ echo '{"jsonrpc":"2.0","method":"get_tables","params":{"params":{"host":"localho
 
 ## Installing
 
-`just dev-install` copies `oracle-plugin` and `manifest.json` into the
+`just dev-install` copies `oracle-plugin` and `.tabularium` into the
 Tabularis plugins folder:
 
 - **Linux:** `~/.local/share/tabularis/plugins/oracle/`

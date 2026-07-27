@@ -41,7 +41,7 @@ demo-db-stop:
 dev-install: build
     mkdir -p ~/.local/share/tabularis/plugins/oracle
     cp target/debug/oracle-plugin ~/.local/share/tabularis/plugins/oracle/
-    cp manifest.json ~/.local/share/tabularis/plugins/oracle/
+    cp .tabularium ~/.local/share/tabularis/plugins/oracle/
     @echo "Installed to ~/.local/share/tabularis/plugins/oracle"
     @echo "Restart Tabularis (or toggle the plugin in Settings) to pick up changes."
 
@@ -49,7 +49,7 @@ dev-install: build
 dev-install: build
     mkdir -p "$HOME/Library/Application Support/com.debba.tabularis/plugins/oracle"
     cp target/debug/oracle-plugin "$HOME/Library/Application Support/com.debba.tabularis/plugins/oracle/"
-    cp manifest.json "$HOME/Library/Application Support/com.debba.tabularis/plugins/oracle/"
+    cp .tabularium "$HOME/Library/Application Support/com.debba.tabularis/plugins/oracle/"
     @echo "Installed to ~/Library/Application Support/com.debba.tabularis/plugins/oracle"
     @echo "Restart Tabularis (or toggle the plugin in Settings) to pick up changes."
 
@@ -62,7 +62,7 @@ dev-install: build
     $dest = Join-Path $env:APPDATA "debba\tabularis\data\plugins\oracle"; \
     New-Item -ItemType Directory -Force -Path $dest | Out-Null; \
     Copy-Item "target\debug\oracle-plugin.exe" $dest; \
-    Copy-Item "manifest.json" $dest; \
+    Copy-Item ".tabularium" $dest; \
     Write-Host "Installed to $dest"; \
     Write-Host "Restart Tabularis (or toggle the plugin in Settings) to pick up changes."
 
