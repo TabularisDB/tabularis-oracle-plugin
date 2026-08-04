@@ -104,12 +104,13 @@ impl Client {
     /// recovery itself — surfaces the original error.
     pub fn query(&self, sql: &str, args: &[Value]) -> Result<QueryResult, PluginError> {
         match self.query_inner(sql, args) {
-            Err(err) if is_unsupported_json_error(&err.message) => {
-                match self.json_safe_rewrite(sql) {
-                    Ok(Some(rewritten)) => self.query_inner(&rewritten, args),
-                    _ => Err(err),
-                }
-            }
+            Err(err) if is_unsupported_json_error(&err.message) => match self.json_safe_rewrite(sql) {
+                Ok(Some(rewritten)) => match self.query_inner(&rewritten, args) {
+                    Ok(result) => Ok(result),
+                    Err(_) => Err(err),
+                },
+                _ => Err(err),
+            },
             other => other,
         }
     }
