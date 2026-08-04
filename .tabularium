@@ -1,9 +1,12 @@
 {
-  "$schema": "https://tabularis.dev/schemas/plugin-manifest.json",
-  "id": "oracle",
-  "name": "Oracle",
+  "name": "oracle",
   "version": "0.1.0",
+  "kind": "driver",
   "description": "Oracle Database driver. Connects to Oracle 12c+ (including Free/XE, Autonomous and RDS) via the Oracle Instant Client.",
+  "engine": "oracle",
+  "paradigms": [
+    "sql"
+  ],
   "default_port": 1521,
   "default_username": "system",
   "executable": "oracle-plugin",
