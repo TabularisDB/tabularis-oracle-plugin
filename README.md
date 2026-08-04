@@ -83,6 +83,10 @@ Implementation notes:
   (beyond-i64 integers are returned as strings instead of losing precision),
   decimals become JSON numbers.
 - `RAW` and `BLOB` values are returned base64-encoded; `CLOB`/`LONG` as text.
+- Native `JSON` columns (21c+) are fetched as text: rust-oracle cannot create
+  fetch buffers for the JSON type, so queries that hit one are transparently
+  retried with the JSON columns wrapped in `JSON_SERIALIZE(... RETURNING CLOB)`
+  (column list discovered server-side via `DBMS_SQL.DESCRIBE_COLUMNS2`).
 - The session is cached inside the plugin process and reused across calls
   (guarded by an OCI ping), because opening an Oracle session is expensive.
 - Trailing semicolons are stripped from plain SQL (OCI rejects them) but kept
