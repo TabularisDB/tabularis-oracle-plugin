@@ -16,9 +16,7 @@ use serde_json::{json, Value};
 
 use crate::client::Client;
 use crate::error::PluginError;
-use crate::handlers::{
-    cell_i64, cell_str, connect, req_str, req_str_any, resolve_schema, respond,
-};
+use crate::handlers::{cell_i64, cell_str, connect, req_str, req_str_any, resolve_schema, respond};
 use crate::utils::identifiers::qualify;
 
 /// Values grouped per table name, as produced by the per-schema catalog queries.
@@ -28,15 +26,40 @@ type GroupedRows = BTreeMap<String, Vec<Value>>;
 // Reusable extractors
 // ---------------------------------------------------------------------------
 
+const TABLES_QUERY: &str = "SELECT t.table_name, tc.comments \
+     FROM all_tables t \
+     LEFT JOIN all_tab_comments tc \
+       ON tc.owner = t.owner AND tc.table_name = t.table_name \
+      AND tc.table_type = 'TABLE' \
+     WHERE t.owner = :1 AND t.nested = 'NO' AND t.secondary = 'N' \
+       AND t.table_name NOT LIKE 'BIN$%' \
+     ORDER BY t.table_name";
+
+fn table_metadata(rows: &[Vec<Value>]) -> Vec<Value> {
+    rows.iter()
+        .filter_map(|row| {
+            let name = cell_str(row, 0)?;
+            let comment = cell_str(row, 1).map(Value::String).unwrap_or(Value::Null);
+            Some(json!({ "name": name, "comment": comment }))
+        })
+        .collect()
+}
+
+fn list_tables(client: &Client, owner: &str) -> Result<Vec<Value>, PluginError> {
+    let result = client.query(TABLES_QUERY, &[json!(owner)])?;
+    Ok(table_metadata(&result.rows))
+}
+
 fn list_table_names(client: &Client, owner: &str) -> Result<Vec<String>, PluginError> {
-    let r = client.query(
-        "SELECT table_name FROM all_tables \
-         WHERE owner = :1 AND nested = 'NO' AND secondary = 'N' \
-           AND table_name NOT LIKE 'BIN$%' \
-         ORDER BY table_name",
-        &[json!(owner)],
-    )?;
-    Ok(r.rows.iter().filter_map(|row| cell_str(row, 0)).collect())
+    Ok(list_tables(client, owner)?
+        .iter()
+        .filter_map(|table| {
+            table
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect())
 }
 
 /// Primary-key columns as (table, column) pairs — one catalog query for a
@@ -69,42 +92,33 @@ fn pk_columns(
 ///
 /// `identity_column` only exists on Oracle 12c+; on older servers the query
 /// is retried without it (every column then reports non-identity).
-fn columns_grouped(
-    client: &Client,
-    owner: &str,
-    table: Option<&str>,
-) -> Result<GroupedRows, PluginError> {
-    let query_for = |with_identity: bool| {
-        let identity_expr = if with_identity {
-            "c.identity_column"
-        } else {
-            "'NO'"
-        };
-        let table_filter = if table.is_some() {
-            " AND c.table_name = :2"
-        } else {
-            ""
-        };
-        format!(
-            "SELECT c.table_name, c.column_name, c.data_type, c.char_length, c.data_length, \
-                    c.data_precision, c.data_scale, c.nullable, c.data_default, {identity_expr} \
-             FROM all_tab_columns c \
-             WHERE c.owner = :1{table_filter} \
-             ORDER BY c.table_name, c.column_id"
-        )
+fn columns_query(with_identity: bool, filter_table: bool) -> String {
+    let identity_expr = if with_identity {
+        "c.identity_column"
+    } else {
+        "'NO'"
     };
-    let args: Vec<Value> = match table {
-        Some(t) => vec![json!(owner), json!(t)],
-        None => vec![json!(owner)],
+    let table_filter = if filter_table {
+        " AND c.table_name = :2"
+    } else {
+        ""
     };
-    let result = client
-        .query(&query_for(true), &args)
-        .or_else(|_| client.query(&query_for(false), &args))?;
+    format!(
+        "SELECT c.table_name, c.column_name, c.data_type, c.char_length, c.data_length, \
+                c.data_precision, c.data_scale, c.nullable, c.data_default, {identity_expr}, \
+                cc.comments \
+         FROM all_tab_columns c \
+         LEFT JOIN all_col_comments cc \
+           ON cc.owner = c.owner AND cc.table_name = c.table_name \
+          AND cc.column_name = c.column_name \
+         WHERE c.owner = :1{table_filter} \
+         ORDER BY c.table_name, c.column_id"
+    )
+}
 
-    let pks = pk_columns(client, owner, table)?;
-
+fn column_metadata(rows: &[Vec<Value>], pks: &HashSet<(String, String)>) -> GroupedRows {
     let mut grouped: GroupedRows = BTreeMap::new();
-    for row in &result.rows {
+    for row in rows {
         let table_name = cell_str(row, 0).unwrap_or_default();
         let name = cell_str(row, 1).unwrap_or_default();
         let base_type = cell_str(row, 2).unwrap_or_default();
@@ -124,6 +138,7 @@ fn columns_grouped(
             .unwrap_or(Value::Null);
         let identity = cell_str(row, 9).as_deref() == Some("YES");
         let is_pk = pks.contains(&(table_name.clone(), name.clone()));
+        let comment = cell_str(row, 10).map(Value::String).unwrap_or(Value::Null);
 
         let char_max = if is_char_type(&base_type) && char_length > 0 {
             json!(char_length)
@@ -139,9 +154,27 @@ fn columns_grouped(
             "is_auto_increment": identity,
             "default_value": default_value,
             "character_maximum_length": char_max,
+            "comment": comment,
         }));
     }
-    Ok(grouped)
+    grouped
+}
+
+fn columns_grouped(
+    client: &Client,
+    owner: &str,
+    table: Option<&str>,
+) -> Result<GroupedRows, PluginError> {
+    let args: Vec<Value> = match table {
+        Some(t) => vec![json!(owner), json!(t)],
+        None => vec![json!(owner)],
+    };
+    let result = client
+        .query(&columns_query(true, table.is_some()), &args)
+        .or_else(|_| client.query(&columns_query(false, table.is_some()), &args))?;
+
+    let pks = pk_columns(client, owner, table)?;
+    Ok(column_metadata(&result.rows, &pks))
 }
 
 fn is_char_type(base: &str) -> bool {
@@ -294,11 +327,7 @@ pub fn get_tables(id: Value, params: &Value) -> Value {
     respond(id, {
         connect(params).and_then(|c| {
             let owner = resolve_schema(&c, params)?;
-            let tables: Vec<Value> = list_table_names(&c, &owner)?
-                .into_iter()
-                .map(|name| json!({ "name": name }))
-                .collect();
-            Ok(json!(tables))
+            Ok(json!(list_tables(&c, &owner)?))
         })
     })
 }
@@ -619,5 +648,83 @@ mod tests {
         assert!(is_char_type("NCHAR"));
         assert!(!is_char_type("NUMBER"));
         assert!(!is_char_type("CLOB"));
+    }
+
+    #[test]
+    fn comment_queries_join_on_owner_and_object_identity() {
+        assert!(TABLES_QUERY.contains("LEFT JOIN all_tab_comments tc"));
+        assert!(TABLES_QUERY.contains("tc.owner = t.owner"));
+        assert!(TABLES_QUERY.contains("tc.table_name = t.table_name"));
+        assert!(TABLES_QUERY.contains("WHERE t.owner = :1"));
+
+        // Single-table, bulk-schema, and pre-12c identity fallback paths all
+        // use the same owner-qualified comment join.
+        for filter_table in [true, false] {
+            for with_identity in [true, false] {
+                let query = columns_query(with_identity, filter_table);
+                assert!(query.contains("LEFT JOIN all_col_comments cc"));
+                assert!(query.contains("cc.owner = c.owner"));
+                assert!(query.contains("cc.table_name = c.table_name"));
+                assert!(query.contains("cc.column_name = c.column_name"));
+                assert!(query.contains("WHERE c.owner = :1"));
+                assert_eq!(query.contains("AND c.table_name = :2"), filter_table);
+            }
+        }
+    }
+
+    #[test]
+    fn table_metadata_preserves_special_comments_and_nulls() {
+        let comment = "Owner's résumé — 東京\nsecond line";
+        let rows = vec![
+            vec![json!("COMMENTED"), json!(comment)],
+            vec![json!("PLAIN"), Value::Null],
+        ];
+
+        assert_eq!(
+            table_metadata(&rows),
+            vec![
+                json!({ "name": "COMMENTED", "comment": comment }),
+                json!({ "name": "PLAIN", "comment": Value::Null }),
+            ]
+        );
+    }
+
+    #[test]
+    fn column_metadata_preserves_special_comments_and_nulls() {
+        let comment = "Manager's notes — café\n第二行";
+        let rows = vec![
+            vec![
+                json!("EMPLOYEES"),
+                json!("NOTES"),
+                json!("CLOB"),
+                json!(0),
+                json!(4000),
+                Value::Null,
+                Value::Null,
+                json!("Y"),
+                Value::Null,
+                json!("NO"),
+                json!(comment),
+            ],
+            vec![
+                json!("EMPLOYEES"),
+                json!("ID"),
+                json!("NUMBER"),
+                json!(0),
+                json!(22),
+                json!(10),
+                json!(0),
+                json!("N"),
+                Value::Null,
+                json!("YES"),
+                Value::Null,
+            ],
+        ];
+        let pks = HashSet::from([("EMPLOYEES".to_string(), "ID".to_string())]);
+
+        let grouped = column_metadata(&rows, &pks);
+        let columns = grouped.get("EMPLOYEES").expect("employee columns");
+        assert_eq!(columns[0]["comment"], comment);
+        assert_eq!(columns[1]["comment"], Value::Null);
     }
 }
