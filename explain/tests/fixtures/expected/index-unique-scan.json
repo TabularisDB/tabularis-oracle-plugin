@@ -1,0 +1,92 @@
+{
+  "root": {
+    "id": "oracle-0",
+    "node_type": "SELECT STATEMENT",
+    "relation": null,
+    "startup_cost": null,
+    "total_cost": 1,
+    "plan_rows": 1,
+    "actual_rows": null,
+    "actual_time_ms": null,
+    "actual_loops": null,
+    "buffers_hit": null,
+    "buffers_read": null,
+    "filter": null,
+    "index_condition": null,
+    "join_type": null,
+    "hash_condition": null,
+    "extra": {
+      "optimizer": "ALL_ROWS",
+      "bytes": 219,
+      "cpu_cost": 15523,
+      "io_cost": 1,
+      "time_s": 1
+    },
+    "children": [
+      {
+        "id": "oracle-1",
+        "node_type": "TABLE ACCESS BY INDEX ROWID",
+        "relation": "CUSTOMERS",
+        "startup_cost": null,
+        "total_cost": 1,
+        "plan_rows": 1,
+        "actual_rows": null,
+        "actual_time_ms": null,
+        "actual_loops": null,
+        "buffers_hit": null,
+        "buffers_read": null,
+        "filter": null,
+        "index_condition": null,
+        "join_type": null,
+        "hash_condition": null,
+        "extra": {
+          "object_owner": "SHOP",
+          "object_type": "TABLE",
+          "object_alias": "\"CUSTOMERS\"@\"SEL$1\"",
+          "bytes": 219,
+          "cpu_cost": 15523,
+          "io_cost": 1,
+          "time_s": 1,
+          "query_block": "SEL$1",
+          "projection": "\"ID\"[NUMBER,22], \"CUSTOMERS\".\"NAME\"[VARCHAR2,100], \"CUSTOMERS\".\"EMAIL\"[VARCHAR2,255], \"CUSTOMERS\".\"REGION\"[VARCHAR2,20], \"CUSTOMERS\".\"CREATED_AT\"[TIMESTAMP,11]"
+        },
+        "children": [
+          {
+            "id": "oracle-2",
+            "node_type": "INDEX UNIQUE SCAN",
+            "relation": "SYS_C008722",
+            "startup_cost": null,
+            "total_cost": 1,
+            "plan_rows": 1,
+            "actual_rows": null,
+            "actual_time_ms": null,
+            "actual_loops": null,
+            "buffers_hit": null,
+            "buffers_read": null,
+            "filter": null,
+            "index_condition": "\"ID\"=3",
+            "join_type": null,
+            "hash_condition": null,
+            "extra": {
+              "object_owner": "SHOP",
+              "object_type": "INDEX (UNIQUE)",
+              "object_alias": "\"CUSTOMERS\"@\"SEL$1\"",
+              "cpu_cost": 8171,
+              "io_cost": 1,
+              "time_s": 1,
+              "query_block": "SEL$1",
+              "projection": "\"CUSTOMERS\".ROWID[ROWID,10], \"ID\"[NUMBER,22]"
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  "planning_time_ms": null,
+  "execution_time_ms": null,
+  "original_query": "",
+  "driver": "oracle",
+  "has_analyze_data": false,
+  "raw_output": "Plan hash value: 1676566473\n \n-------------------------------------------------------------------------------------------\n| Id  | Operation                   | Name        | Rows  | Bytes | Cost (%CPU)| Time     |\n-------------------------------------------------------------------------------------------\n|   0 | SELECT STATEMENT            |             |     1 |   219 |     1   (0)| 00:00:01 |\n|   1 |  TABLE ACCESS BY INDEX ROWID| CUSTOMERS   |     1 |   219 |     1   (0)| 00:00:01 |\n|*  2 |   INDEX UNIQUE SCAN         | SYS_C008722 |     1 |       |     1   (0)| 00:00:01 |\n-------------------------------------------------------------------------------------------\n \nPredicate Information (identified by operation id):\n---------------------------------------------------\n \n   2 - access(\"ID\"=3)"
+}

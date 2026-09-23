@@ -104,13 +104,15 @@ impl Client {
     /// recovery itself — surfaces the original error.
     pub fn query(&self, sql: &str, args: &[Value]) -> Result<QueryResult, PluginError> {
         match self.query_inner(sql, args) {
-            Err(err) if is_unsupported_json_error(&err.message) => match self.json_safe_rewrite(sql) {
-                Ok(Some(rewritten)) => match self.query_inner(&rewritten, args) {
-                    Ok(result) => Ok(result),
-                    Err(_) => Err(err),
-                },
-                _ => Err(err),
-            },
+            Err(err) if is_unsupported_json_error(&err.message) => {
+                match self.json_safe_rewrite(sql) {
+                    Ok(Some(rewritten)) => match self.query_inner(&rewritten, args) {
+                        Ok(result) => Ok(result),
+                        Err(_) => Err(err),
+                    },
+                    _ => Err(err),
+                }
+            }
             other => other,
         }
     }
@@ -154,6 +156,32 @@ impl Client {
             rows: out_rows,
             affected: 0,
         })
+    }
+
+    /// Run a row-returning statement to completion, discarding the rows, and
+    /// return how many were fetched. Used by EXPLAIN ANALYZE, which needs the
+    /// cursor executed and fully fetched but not its data. Native JSON columns
+    /// get the same `JSON_SERIALIZE` retry as `query`.
+    pub fn drain(&self, sql: &str) -> Result<u64, PluginError> {
+        match self.drain_inner(sql) {
+            Err(err) if is_unsupported_json_error(&err.message) => {
+                match self.json_safe_rewrite(sql) {
+                    Ok(Some(rewritten)) => self.drain_inner(&rewritten).map_err(|_| err),
+                    _ => Err(err),
+                }
+            }
+            other => other,
+        }
+    }
+
+    fn drain_inner(&self, sql: &str) -> Result<u64, PluginError> {
+        let mut stmt = self.conn().statement(sql).build()?;
+        let mut fetched = 0;
+        for row in stmt.query(&[])? {
+            row?;
+            fetched += 1;
+        }
+        Ok(fetched)
     }
 
     /// Run a non-row statement (DML/DDL/PLSQL) and return the affected-row count.
@@ -282,7 +310,12 @@ pub fn connect_string(params: &ConnectionParams) -> Result<String, PluginError> 
         return Ok(database.to_string());
     }
 
-    if let Some(host) = params.host.as_deref().map(str::trim).filter(|h| !h.is_empty()) {
+    if let Some(host) = params
+        .host
+        .as_deref()
+        .map(str::trim)
+        .filter(|h| !h.is_empty())
+    {
         if database.is_empty() {
             return Err(PluginError::invalid_params(
                 "missing service name: put the Oracle service name (e.g. FREEPDB1 or ORCLPDB1) in the Database field",
@@ -330,7 +363,10 @@ mod tests {
     #[test]
     fn host_and_service_build_ezconnect() {
         let p = params(Some("db.example.com"), Some(1521), Some("FREEPDB1"), None);
-        assert_eq!(connect_string(&p).unwrap(), "//db.example.com:1521/FREEPDB1");
+        assert_eq!(
+            connect_string(&p).unwrap(),
+            "//db.example.com:1521/FREEPDB1"
+        );
     }
 
     #[test]
@@ -341,7 +377,12 @@ mod tests {
 
     #[test]
     fn ssl_mode_require_uses_tcps() {
-        let p = params(Some("adb.eu-1.oraclecloud.com"), Some(1522), Some("mydb_high"), Some("require"));
+        let p = params(
+            Some("adb.eu-1.oraclecloud.com"),
+            Some(1522),
+            Some("mydb_high"),
+            Some("require"),
+        );
         assert_eq!(
             connect_string(&p).unwrap(),
             "tcps://adb.eu-1.oraclecloud.com:1522/mydb_high",

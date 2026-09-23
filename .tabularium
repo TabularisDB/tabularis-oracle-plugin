@@ -1,11 +1,81 @@
 {
+  "$schema": "https://registry.tabularis.dev/manifest.schema.json?kind=driver",
   "name": "oracle",
   "version": "0.1.0",
+  "description": "Oracle Database driver for Tabularis (12c+, Free/XE, Autonomous Database, RDS) with multi-schema browsing, query execution, Visual EXPLAIN with runtime statistics, row editing, DDL, views, routines and table/column comments. Requires the Oracle Instant Client.",
+  "category": "database",
+  "tags": [
+    "driver",
+    "oracle",
+    "plsql",
+    "sql",
+    "relational",
+    "database-driver"
+  ],
+  "license": "Apache-2.0",
+  "icon": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/oracle-icon.svg",
+  "color": "#C74634",
+  "screenshots": [
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/01-database-picker.png",
+      "caption": "Oracle listed in the database picker",
+      "alt": "Choose a database dialog filtered to the installed Oracle driver in the Relational category"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/02-connection-form.png",
+      "caption": "Connection configuration form",
+      "alt": "Oracle connection form with host, port, username, password and FREEPDB1 service name filled in"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/03-test-connection-success.png",
+      "caption": "Successful connection test",
+      "alt": "Oracle connection form showing a green Connection successful message"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/04-schema-browser.png",
+      "caption": "Schema browsing with tables, views and routines",
+      "alt": "Sidebar schema tree showing the SHOP schema with CUSTOMERS columns and types, a view, a function and a procedure"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/05-table-data.png",
+      "caption": "Data grid with filtering",
+      "alt": "Oracle CUSTOMERS table data grid filtered to the West region"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/06-table-structure.png",
+      "caption": "Table and column comments",
+      "alt": "Schema dialog for the CUSTOMERS table showing Oracle column types, the identity primary key and table and column comments"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/07-query-editor.png",
+      "caption": "SQL editor with query results",
+      "alt": "SQL editor running an aggregate query over Oracle orders with results below"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/assets/screenshots/08-visual-explain.png",
+      "caption": "Visual EXPLAIN with runtime statistics",
+      "alt": "Visual EXPLAIN table view of an Oracle plan with hash joins, estimated and actual rows, self time and diagnostics"
+    }
+  ],
+  "readme": "README.md",
+  "homepage": "https://github.com/TabularisDB/tabularis-oracle-plugin",
+  "documentation_url": "https://github.com/TabularisDB/tabularis-oracle-plugin#readme",
+  "min_runtime_version": "0.25.0",
+  "support": {
+    "issues_url": "https://github.com/TabularisDB/tabularis-oracle-plugin/issues"
+  },
   "kind": "driver",
-  "description": "Oracle Database driver. Connects to Oracle 12c+ (including Free/XE, Autonomous and RDS) via the Oracle Instant Client.",
   "engine": "oracle",
+  "explain_parsers": [
+    {
+      "engine": "oracle",
+      "format": "oracle-plan-json",
+      "label": "Oracle execution plan (JSON)",
+      "module": "explain/dist/index.iife.js"
+    }
+  ],
   "paradigms": [
-    "sql"
+    "relational"
   ],
   "default_port": 1521,
   "default_username": "system",
@@ -28,17 +98,10 @@
     "no_connection_required": false,
     "manage_tables": true,
     "readonly": false,
-    "supports_ssl": true
+    "supports_ssl": true,
+    "sql_dialect": "oracle",
+    "explain": true
   },
-  "settings": [
-    {
-      "key": "client_lib_dir",
-      "label": "Oracle Client library directory",
-      "type": "string",
-      "required": false,
-      "description": "Directory containing the Oracle Instant Client libraries (oci.dll / libclntsh). Leave empty if the client is already on the system PATH / LD_LIBRARY_PATH."
-    }
-  ],
   "data_types": [
     {
       "name": "NUMBER",
@@ -178,6 +241,15 @@
       "category": "other",
       "requires_length": false,
       "requires_precision": false
+    }
+  ],
+  "settings": [
+    {
+      "key": "client_lib_dir",
+      "label": "Oracle Client library directory",
+      "type": "string",
+      "required": false,
+      "description": "Directory containing the Oracle Instant Client (oci.dll / libclntsh). Leave empty if it is on the system library path. On Linux, register it with ldconfig or LD_LIBRARY_PATH instead: this setting alone cannot resolve libclntsh's dependencies."
     }
   ]
 }
