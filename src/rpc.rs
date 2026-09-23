@@ -47,7 +47,7 @@ pub fn handle_line(line: &str) -> Value {
 
         // Query execution.
         "execute_query" => handlers::query::execute_query(id, &params),
-        "explain_query" => handlers::query::explain_query(id, &params),
+        "explain_query" => handlers::explain::explain_query(id, &params),
 
         // CRUD.
         "insert_record" => handlers::crud::insert_record(id, &params),
@@ -109,9 +109,8 @@ mod tests {
 
     #[test]
     fn missing_connection_target_is_invalid_params() {
-        let resp = handle_line(
-            r#"{"jsonrpc":"2.0","method":"get_tables","params":{"params":{}},"id":1}"#,
-        );
+        let resp =
+            handle_line(r#"{"jsonrpc":"2.0","method":"get_tables","params":{"params":{}},"id":1}"#);
         assert_eq!(resp["error"]["code"], -32602);
     }
 }

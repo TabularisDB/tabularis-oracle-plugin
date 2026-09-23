@@ -3,10 +3,6 @@
 **/*.rs.bk
 *.pdb
 
-# Cargo lockfile — ignored to match the tabularis plugin template convention.
-# (For a binary crate, committing it is also a reasonable choice.)
-Cargo.lock
-
 # Packaged plugin archives (produced by CI / manual packaging)
 *.zip
 /staging/
@@ -27,3 +23,7 @@ desktop.ini
 *.log
 .env
 .env.*
+
+# EXPLAIN parser package
+explain/node_modules/
+explain/dist/

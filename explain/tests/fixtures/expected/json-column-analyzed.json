@@ -1,0 +1,63 @@
+{
+  "root": {
+    "id": "oracle-0",
+    "node_type": "SELECT STATEMENT",
+    "relation": null,
+    "startup_cost": null,
+    "total_cost": 3,
+    "plan_rows": null,
+    "actual_rows": 3,
+    "actual_time_ms": 0.029,
+    "actual_loops": 1,
+    "buffers_hit": 7,
+    "buffers_read": 0,
+    "filter": null,
+    "index_condition": null,
+    "join_type": null,
+    "hash_condition": null,
+    "extra": {
+      "optimizer": "ALL_ROWS",
+      "actual_rows_total": 3,
+      "actual_time_ms_total": 0.029
+    },
+    "children": [
+      {
+        "id": "oracle-1",
+        "node_type": "TABLE ACCESS FULL",
+        "relation": "PRODUCTS",
+        "startup_cost": null,
+        "total_cost": 3,
+        "plan_rows": 3,
+        "actual_rows": 3,
+        "actual_time_ms": 0.029,
+        "actual_loops": 1,
+        "buffers_hit": 7,
+        "buffers_read": 0,
+        "filter": "\"PRICE\">40",
+        "index_condition": null,
+        "join_type": null,
+        "hash_condition": null,
+        "extra": {
+          "object_owner": "SHOP",
+          "object_type": "TABLE",
+          "object_alias": "\"PRODUCTS\"@\"SEL$2\"",
+          "bytes": 12381,
+          "cpu_cost": 36707,
+          "io_cost": 3,
+          "time_s": 1,
+          "query_block": "SEL$F5BB74E1",
+          "projection": "\"SKU\"[VARCHAR2,20], \"ATTRIBUTES\" /*+ LOB_BY_VALUE */ [JSON,8200]",
+          "actual_rows_total": 3,
+          "actual_time_ms_total": 0.029
+        },
+        "children": []
+      }
+    ]
+  },
+  "planning_time_ms": null,
+  "execution_time_ms": 0.029,
+  "original_query": "",
+  "driver": "oracle",
+  "has_analyze_data": true,
+  "raw_output": "SQL_ID  0m3845479dh5x, child number 0\n-------------------------------------\nSELECT \"SKU\", JSON_SERIALIZE(\"ATTRIBUTES\" RETURNING CLOB) AS \n\"ATTRIBUTES\" FROM (SELECT sku, attributes FROM shop.products WHERE \nprice > 40)\n \nPlan hash value: 1954719464\n \n-------------------------------------------------------------------------------------------------------------\n| Id  | Operation         | Name     | Starts | E-Rows |E-Bytes| Cost (%CPU)| A-Rows |   A-Time   | Buffers |\n-------------------------------------------------------------------------------------------------------------\n|   0 | SELECT STATEMENT  |          |      1 |        |       |     3 (100)|      3 |00:00:00.01 |       7 |\n|*  1 |  TABLE ACCESS FULL| PRODUCTS |      1 |      3 | 12381 |     3   (0)|      3 |00:00:00.01 |       7 |\n-------------------------------------------------------------------------------------------------------------\n \nPredicate Information (identified by operation id):\n---------------------------------------------------\n \n   1 - filter(\"PRICE\">40)\n \nNote\n-----\n   - dynamic statistics used: dynamic sampling (level=2)\n "
+}

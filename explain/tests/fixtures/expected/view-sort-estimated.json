@@ -1,0 +1,226 @@
+{
+  "root": {
+    "id": "oracle-0",
+    "node_type": "SELECT STATEMENT",
+    "relation": null,
+    "startup_cost": null,
+    "total_cost": 11,
+    "plan_rows": 20,
+    "actual_rows": null,
+    "actual_time_ms": null,
+    "actual_loops": null,
+    "buffers_hit": null,
+    "buffers_read": null,
+    "filter": null,
+    "index_condition": null,
+    "join_type": null,
+    "hash_condition": null,
+    "extra": {
+      "optimizer": "ALL_ROWS",
+      "bytes": 2840,
+      "cpu_cost": 123021701,
+      "io_cost": 9,
+      "time_s": 1
+    },
+    "children": [
+      {
+        "id": "oracle-1",
+        "node_type": "SORT ORDER BY",
+        "relation": null,
+        "startup_cost": null,
+        "total_cost": 11,
+        "plan_rows": 20,
+        "actual_rows": null,
+        "actual_time_ms": null,
+        "actual_loops": null,
+        "buffers_hit": null,
+        "buffers_read": null,
+        "filter": null,
+        "index_condition": null,
+        "join_type": null,
+        "hash_condition": null,
+        "extra": {
+          "bytes": 2840,
+          "cpu_cost": 123021701,
+          "io_cost": 9,
+          "time_s": 1,
+          "query_block": "SEL$E213D7C1",
+          "projection": "(#keys=1; rowset=256) SUM(\"I\".\"QUANTITY\"*\"I\".\"UNIT_PRICE\")[22], \"C\".\"ID\"[NUMBER,22], \"C\".\"NAME\"[VARCHAR2,100], \"C\".\"REGION\"[VARCHAR2,20]"
+        },
+        "children": [
+          {
+            "id": "oracle-2",
+            "node_type": "HASH GROUP BY",
+            "relation": null,
+            "startup_cost": null,
+            "total_cost": 11,
+            "plan_rows": 20,
+            "actual_rows": null,
+            "actual_time_ms": null,
+            "actual_loops": null,
+            "buffers_hit": null,
+            "buffers_read": null,
+            "filter": null,
+            "index_condition": null,
+            "join_type": null,
+            "hash_condition": null,
+            "extra": {
+              "bytes": 2840,
+              "cpu_cost": 123021701,
+              "io_cost": 9,
+              "time_s": 1,
+              "projection": "(#keys=3; rowset=256) \"C\".\"ID\"[NUMBER,22], \"C\".\"NAME\"[VARCHAR2,100], \"C\".\"REGION\"[VARCHAR2,20], SUM(\"I\".\"QUANTITY\"*\"I\".\"UNIT_PRICE\")[22]"
+            },
+            "children": [
+              {
+                "id": "oracle-3",
+                "node_type": "HASH JOIN",
+                "relation": null,
+                "startup_cost": null,
+                "total_cost": 9,
+                "plan_rows": 20,
+                "actual_rows": null,
+                "actual_time_ms": null,
+                "actual_loops": null,
+                "buffers_hit": null,
+                "buffers_read": null,
+                "filter": null,
+                "index_condition": null,
+                "join_type": "INNER",
+                "hash_condition": "\"I\".\"ORDER_ID\"=\"O\".\"ID\"",
+                "extra": {
+                  "bytes": 2840,
+                  "cpu_cost": 1320822,
+                  "io_cost": 9,
+                  "time_s": 1,
+                  "projection": "(#keys=1; rowset=256) \"C\".\"ID\"[NUMBER,22], \"C\".\"REGION\"[VARCHAR2,20], \"C\".\"NAME\"[VARCHAR2,100], \"I\".\"UNIT_PRICE\"[NUMBER,22], \"I\".\"QUANTITY\"[NUMBER,22]"
+                },
+                "children": [
+                  {
+                    "id": "oracle-4",
+                    "node_type": "HASH JOIN",
+                    "relation": null,
+                    "startup_cost": null,
+                    "total_cost": 6,
+                    "plan_rows": 10,
+                    "actual_rows": null,
+                    "actual_time_ms": null,
+                    "actual_loops": null,
+                    "buffers_hit": null,
+                    "buffers_read": null,
+                    "filter": null,
+                    "index_condition": null,
+                    "join_type": "INNER",
+                    "hash_condition": "\"O\".\"CUSTOMER_ID\"=\"C\".\"ID\"",
+                    "extra": {
+                      "bytes": 1030,
+                      "cpu_cost": 677514,
+                      "io_cost": 6,
+                      "time_s": 1,
+                      "projection": "(#keys=1; rowset=256) \"C\".\"ID\"[NUMBER,22], \"C\".\"REGION\"[VARCHAR2,20], \"C\".\"NAME\"[VARCHAR2,100], \"O\".\"ID\"[NUMBER,22]"
+                    },
+                    "children": [
+                      {
+                        "id": "oracle-5",
+                        "node_type": "TABLE ACCESS FULL",
+                        "relation": "CUSTOMERS",
+                        "startup_cost": null,
+                        "total_cost": 3,
+                        "plan_rows": 10,
+                        "actual_rows": null,
+                        "actual_time_ms": null,
+                        "actual_loops": null,
+                        "buffers_hit": null,
+                        "buffers_read": null,
+                        "filter": null,
+                        "index_condition": null,
+                        "join_type": null,
+                        "hash_condition": null,
+                        "extra": {
+                          "object_owner": "SHOP",
+                          "object_type": "TABLE",
+                          "object_alias": "\"C\"@\"SEL$2\"",
+                          "bytes": 770,
+                          "cpu_cost": 37707,
+                          "io_cost": 3,
+                          "time_s": 1,
+                          "query_block": "SEL$E213D7C1",
+                          "projection": "(rowset=256) \"C\".\"ID\"[NUMBER,22], \"C\".\"NAME\"[VARCHAR2,100], \"C\".\"REGION\"[VARCHAR2,20]"
+                        },
+                        "children": []
+                      },
+                      {
+                        "id": "oracle-6",
+                        "node_type": "TABLE ACCESS FULL",
+                        "relation": "ORDERS",
+                        "startup_cost": null,
+                        "total_cost": 3,
+                        "plan_rows": 10,
+                        "actual_rows": null,
+                        "actual_time_ms": null,
+                        "actual_loops": null,
+                        "buffers_hit": null,
+                        "buffers_read": null,
+                        "filter": null,
+                        "index_condition": null,
+                        "join_type": null,
+                        "hash_condition": null,
+                        "extra": {
+                          "object_owner": "SHOP",
+                          "object_type": "TABLE",
+                          "object_alias": "\"O\"@\"SEL$2\"",
+                          "bytes": 260,
+                          "cpu_cost": 37307,
+                          "io_cost": 3,
+                          "time_s": 1,
+                          "query_block": "SEL$E213D7C1",
+                          "projection": "(rowset=256) \"O\".\"ID\"[NUMBER,22], \"O\".\"CUSTOMER_ID\"[NUMBER,22]"
+                        },
+                        "children": []
+                      }
+                    ]
+                  },
+                  {
+                    "id": "oracle-7",
+                    "node_type": "TABLE ACCESS FULL",
+                    "relation": "ORDER_ITEMS",
+                    "startup_cost": null,
+                    "total_cost": 3,
+                    "plan_rows": 20,
+                    "actual_rows": null,
+                    "actual_time_ms": null,
+                    "actual_loops": null,
+                    "buffers_hit": null,
+                    "buffers_read": null,
+                    "filter": null,
+                    "index_condition": null,
+                    "join_type": null,
+                    "hash_condition": null,
+                    "extra": {
+                      "object_owner": "SHOP",
+                      "object_type": "TABLE",
+                      "object_alias": "\"I\"@\"SEL$3\"",
+                      "bytes": 780,
+                      "cpu_cost": 39807,
+                      "io_cost": 3,
+                      "time_s": 1,
+                      "query_block": "SEL$E213D7C1",
+                      "projection": "(rowset=256) \"I\".\"ORDER_ID\"[NUMBER,22], \"I\".\"QUANTITY\"[NUMBER,22], \"I\".\"UNIT_PRICE\"[NUMBER,22]"
+                    },
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "planning_time_ms": null,
+  "execution_time_ms": null,
+  "original_query": "",
+  "driver": "oracle",
+  "has_analyze_data": false,
+  "raw_output": "Plan hash value: 1088837380\n \n-------------------------------------------------------------------------------------\n| Id  | Operation             | Name        | Rows  | Bytes | Cost (%CPU)| Time     |\n-------------------------------------------------------------------------------------\n|   0 | SELECT STATEMENT      |             |    20 |  2840 |    11  (19)| 00:00:01 |\n|   1 |  SORT ORDER BY        |             |    20 |  2840 |    11  (19)| 00:00:01 |\n|   2 |   HASH GROUP BY       |             |    20 |  2840 |    11  (19)| 00:00:01 |\n|*  3 |    HASH JOIN          |             |    20 |  2840 |     9   (0)| 00:00:01 |\n|*  4 |     HASH JOIN         |             |    10 |  1030 |     6   (0)| 00:00:01 |\n|   5 |      TABLE ACCESS FULL| CUSTOMERS   |    10 |   770 |     3   (0)| 00:00:01 |\n|   6 |      TABLE ACCESS FULL| ORDERS      |    10 |   260 |     3   (0)| 00:00:01 |\n|   7 |     TABLE ACCESS FULL | ORDER_ITEMS |    20 |   780 |     3   (0)| 00:00:01 |\n-------------------------------------------------------------------------------------\n \nPredicate Information (identified by operation id):\n---------------------------------------------------\n \n   3 - access(\"I\".\"ORDER_ID\"=\"O\".\"ID\")\n   4 - access(\"O\".\"CUSTOMER_ID\"=\"C\".\"ID\")\n \nNote\n-----\n   - dynamic statistics used: dynamic sampling (level=2)"
+}

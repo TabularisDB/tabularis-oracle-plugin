@@ -186,7 +186,12 @@ fn render_default(value: &str) -> String {
     let upper = value.trim().to_ascii_uppercase();
     let is_expression = matches!(
         upper.as_str(),
-        "NULL" | "SYSDATE" | "SYSTIMESTAMP" | "CURRENT_DATE" | "CURRENT_TIMESTAMP" | "LOCALTIMESTAMP"
+        "NULL"
+            | "SYSDATE"
+            | "SYSTIMESTAMP"
+            | "CURRENT_DATE"
+            | "CURRENT_TIMESTAMP"
+            | "LOCALTIMESTAMP"
     ) || upper.ends_with(".NEXTVAL")
         || upper == "SYS_GUID()";
     if is_expression || value.trim().parse::<f64>().is_ok() {
@@ -371,11 +376,17 @@ mod tests {
         let old = json!({ "name": "A", "data_type": "NUMBER", "is_nullable": true });
         let new = json!({ "name": "A", "data_type": "NUMBER", "is_nullable": false });
         let stmts = build_alter_column_sql(None, "T", Some(&old), &new).unwrap();
-        assert_eq!(stmts, vec!["ALTER TABLE \"T\" MODIFY (\"A\" NUMBER NOT NULL)".to_string()]);
+        assert_eq!(
+            stmts,
+            vec!["ALTER TABLE \"T\" MODIFY (\"A\" NUMBER NOT NULL)".to_string()]
+        );
 
         let unchanged = json!({ "name": "A", "data_type": "NUMBER", "is_nullable": true });
         let stmts =
             build_alter_column_sql(None, "T", Some(&unchanged), &unchanged.clone()).unwrap();
-        assert_eq!(stmts, vec!["ALTER TABLE \"T\" MODIFY (\"A\" NUMBER)".to_string()]);
+        assert_eq!(
+            stmts,
+            vec!["ALTER TABLE \"T\" MODIFY (\"A\" NUMBER)".to_string()]
+        );
     }
 }

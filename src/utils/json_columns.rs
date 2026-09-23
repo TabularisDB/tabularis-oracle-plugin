@@ -97,7 +97,9 @@ mod tests {
         assert!(is_unsupported_json_error(
             "oracle error: unsupported Oracle type JSON"
         ));
-        assert!(!is_unsupported_json_error("ORA-00942: table or view does not exist"));
+        assert!(!is_unsupported_json_error(
+            "ORA-00942: table or view does not exist"
+        ));
         assert!(!is_unsupported_json_error("unsupported Oracle type VECTOR"));
     }
 
@@ -128,7 +130,10 @@ mod tests {
 
     #[test]
     fn no_projection_without_json_columns() {
-        assert_eq!(json_safe_projection(&[(2, "ID".into()), (1, "NAME".into())]), None);
+        assert_eq!(
+            json_safe_projection(&[(2, "ID".into()), (1, "NAME".into())]),
+            None
+        );
     }
 
     #[test]

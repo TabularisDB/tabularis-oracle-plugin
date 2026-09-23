@@ -5,8 +5,6 @@
 //! follows the native drivers' pattern: fetch `limit + 1` rows, report
 //! `has_more` and truncate, leave `total_rows` unset (no COUNT round-trip).
 
-use std::time::Instant;
-
 use serde_json::{json, Value};
 
 use crate::error::PluginError;
@@ -102,47 +100,4 @@ fn execute_query_impl(params: &Value) -> Result<Value, PluginError> {
             "pagination": Value::Null,
         }))
     }
-}
-
-pub fn explain_query(id: Value, params: &Value) -> Value {
-    respond(id, explain_query_impl(params))
-}
-
-/// The host deserialises this as its `ExplainPlan` model. Oracle's plan output
-/// (DBMS_XPLAN) is a formatted text table, so it ships in `raw_output` under a
-/// single root node rather than a parsed tree.
-fn explain_query_impl(params: &Value) -> Result<Value, PluginError> {
-    let client = connect(params)?;
-    let query = req_str(params, "query")?;
-
-    let started = Instant::now();
-    // Oracle explain is two-step: populate PLAN_TABLE, then render it.
-    client.execute(
-        &format!("EXPLAIN PLAN FOR {}", prepare_statement(&query)),
-        &[],
-    )?;
-    let result = client.query(
-        "SELECT plan_table_output FROM TABLE(DBMS_XPLAN.DISPLAY())",
-        &[],
-    )?;
-    let raw: String = result
-        .rows
-        .iter()
-        .filter_map(|row| row.first().and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(json!({
-        "root": {
-            "id": "oracle-plan",
-            "node_type": "Oracle execution plan",
-            "extra": {},
-            "children": [],
-        },
-        "planning_time_ms": started.elapsed().as_millis() as f64,
-        "original_query": query,
-        "driver": "oracle",
-        "has_analyze_data": false,
-        "raw_output": raw,
-    }))
 }

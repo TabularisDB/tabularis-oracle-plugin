@@ -6,8 +6,64 @@ on:
       - "v*"
 
 jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag matches manifest, crate and EXPLAIN package versions
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TABULARIUM_VERSION=$(jq -r .version .tabularium)
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          EXPLAIN_VERSION=$(jq -r .version explain/package.json)
+
+          if [ "$TAG_VERSION" != "$TABULARIUM_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match .tabularium version ($TABULARIUM_VERSION)"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+          # The plugin binaries and the npm parser package ship from the same
+          # tag, so their versions must agree before anything is built.
+          if [ "$TAG_VERSION" != "$EXPLAIN_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match explain/package.json version ($EXPLAIN_VERSION)"
+            exit 1
+          fi
+
+      - name: Validate manifest against the live registry schema
+        run: |
+          npx --yes @tabularium/cli validate .tabularium \
+            --registry https://registry.tabularis.dev --kind driver
+
+      # See ci.yml: pnpm comes from the pinned "packageManager" field, not
+      # from the Corepack copy bundled with Node.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: explain/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          # pnpm 11.23 requires Node 22.13 or newer.
+          node-version: "22.13"
+
+      # Typecheck and test the parser before any platform binary is built so a
+      # broken parser fails the whole release instead of only the npm half.
+      - name: Typecheck and test EXPLAIN parser
+        working-directory: explain
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+
   build:
     name: ${{ matrix.platform-label }}
+    needs: validate
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -41,7 +97,7 @@ jobs:
             binary-suffix: ".exe"
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -58,19 +114,46 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup Node
-        if: steps.ui.outputs.present == 'true'
-        uses: actions/setup-node@v5
+      - name: Check for EXPLAIN parser
+        id: explain
+        shell: bash
+        run: |
+          if [ -f explain/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # See ci.yml: pnpm comes from the pinned "packageManager" field, not
+      # from the Corepack copy bundled with Node.
+      - name: Setup pnpm
+        if: steps.explain.outputs.present == 'true'
+        uses: pnpm/action-setup@v6
         with:
-          node-version: "20"
+          package_json_file: explain/package.json
+
+      - name: Setup Node
+        if: steps.ui.outputs.present == 'true' || steps.explain.outputs.present == 'true'
+        uses: actions/setup-node@v7
+        with:
+          # pnpm 11.23 requires Node 22.13 or newer.
+          node-version: "22.13"
 
       - name: Build UI
         if: steps.ui.outputs.present == 'true'
         shell: bash
         working-directory: ui
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run build
+
+      - name: Build EXPLAIN parser
+        if: steps.explain.outputs.present == 'true'
+        shell: bash
+        working-directory: explain
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Install cross (linux-arm64 only)
         if: matrix.cross
@@ -98,6 +181,10 @@ jobs:
             mkdir -p "$STAGE/ui/dist"
             cp ui/dist/index.js "$STAGE/ui/dist/"
           fi
+          if [ -f explain/dist/index.iife.js ]; then
+            mkdir -p "$STAGE/explain/dist"
+            cp explain/dist/index.iife.js "$STAGE/explain/dist/"
+          fi
           (cd "$STAGE" && zip -r ../oracle-plugin-${{ matrix.platform-label }}.zip .)
 
       - name: Package (windows)
@@ -115,14 +202,71 @@ jobs:
             New-Item -ItemType Directory -Force -Path "$stage\ui\dist" | Out-Null
             Copy-Item "ui\dist\index.js" "$stage\ui\dist"
           }
+          if (Test-Path "explain\dist\index.iife.js") {
+            New-Item -ItemType Directory -Force -Path "$stage\explain\dist" | Out-Null
+            Copy-Item "explain\dist\index.iife.js" "$stage\explain\dist"
+          }
           Compress-Archive -Path "$stage\*" -DestinationPath "oracle-plugin-${{ matrix.platform-label }}.zip"
 
       - name: Stash artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: oracle-plugin-${{ matrix.platform-label }}
           path: oracle-plugin-${{ matrix.platform-label }}.zip
           retention-days: 1
+
+  publish-explain:
+    name: Publish EXPLAIN parser to npm
+    # Runs only once every platform binary has built, so the npm package and
+    # the GitHub release are cut from the same tag in the same run.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: explain/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22.13"
+          registry-url: "https://registry.npmjs.org"
+
+      # npm never accepts a second publish of an existing version, so a re-run
+      # of this workflow (or a recreated tag) must not fail the release on the
+      # npm half once the package is already out.
+      - name: Check whether this version is already on npm
+        id: npm
+        working-directory: explain
+        run: |
+          NAME=$(jq -r .name package.json)
+          VERSION=$(jq -r .version package.json)
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::warning::$NAME@$VERSION is already published on npm; skipping publish"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install and build
+        if: steps.npm.outputs.published == 'false'
+        working-directory: explain
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Publish
+        if: steps.npm.outputs.published == 'false'
+        working-directory: explain
+        run: pnpm publish --access public --provenance --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   release:
     name: Publish GitHub release
@@ -132,19 +276,32 @@ jobs:
       contents: write
     steps:
       - name: Checkout (for the .tabularium manifest asset)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
+      - name: Detect prerelease from tag
+        id: meta
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$TAG_NAME" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # .tabularium ships as a standalone asset: the registry resolves the
           # manifest from release assets, not the git ref.
           files: |
             artifacts/*.zip
             .tabularium
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.meta.outputs.prerelease == 'false' }}
