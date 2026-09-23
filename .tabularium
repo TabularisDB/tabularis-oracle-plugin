@@ -249,7 +249,7 @@
       "label": "Oracle Client library directory",
       "type": "string",
       "required": false,
-      "description": "Directory containing the Oracle Instant Client libraries (oci.dll / libclntsh). Leave empty if the client is already on the system PATH / LD_LIBRARY_PATH."
+      "description": "Directory containing the Oracle Instant Client (oci.dll / libclntsh). Leave empty if it is on the system library path. On Linux, register it with ldconfig or LD_LIBRARY_PATH instead: this setting alone cannot resolve libclntsh's dependencies."
     }
   ]
 }

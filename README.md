@@ -75,10 +75,17 @@ Oracle's wire protocol is proprietary, so every driver goes through Oracle's own
 
 Install the free [Oracle Instant Client "Basic" or "Basic Light"](https://www.oracle.com/database/technologies/instant-client/downloads.html) package and make it findable in one of two ways:
 
-1. Put its directory on the system `PATH` (Windows) / `LD_LIBRARY_PATH` (Linux) / standard library path (macOS), **or**
-2. Set **Oracle Client library directory** in the plugin's settings (Settings → Installed Plugins → Oracle → gear icon) to the Instant Client folder.
+- **macOS / Windows:** put its directory on the standard library path / `PATH`, **or** set **Oracle Client library directory** in the plugin's settings (Settings → Installed Plugins → Oracle → gear icon) to the Instant Client folder.
+- **Linux:** register the directory with the dynamic loader before starting Tabularis, for example:
 
-On Linux the Instant Client also needs `libaio` (`libaio1t64` on Ubuntu 24.04). If the library cannot be found, connections fail with a clear DPI-1047 hint rather than a cryptic loader error.
+  ```bash
+  echo /opt/oracle/instantclient_23_26 | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf
+  sudo ldconfig
+  ```
+
+  or export `LD_LIBRARY_PATH`. The plugin setting alone is not enough on Linux: the loader resolves `libclntsh`'s own dependencies (`libnnz`, ...) only from the system search path. The Instant Client also needs `libaio` (`libaio1t64` on Ubuntu 24.04, plus a `libaio.so.1` symlink).
+
+If the library cannot be found, connections fail with a clear DPI-1047 hint rather than a cryptic loader error.
 
 ## Connection Configuration
 

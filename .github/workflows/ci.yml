@@ -112,7 +112,10 @@ jobs:
 
       # The plugin loads libclntsh at runtime. Basic Light is the smallest
       # Instant Client package; it needs libaio, which Ubuntu 24.04 ships as
-      # libaio1t64 without the legacy libaio.so.1 soname.
+      # libaio1t64 without the legacy libaio.so.1 soname. On Linux the client
+      # must be on the loader path (ldconfig), exactly as the README tells
+      # users: libclntsh's own dependencies (libnnz, ...) are not resolved
+      # from the plugin's client_lib_dir setting.
       - name: Install Oracle Instant Client
         run: |
           sudo apt-get update -q
@@ -120,8 +123,9 @@ jobs:
           sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
           curl -fsSL -o instantclient.zip \
             https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
-          unzip -q instantclient.zip -d "$RUNNER_TEMP"
-          echo "ORACLE_CLIENT_LIB_DIR=$(ls -d "$RUNNER_TEMP"/instantclient_*)" >> "$GITHUB_ENV"
+          sudo unzip -q instantclient.zip -d /opt/oracle
+          ls -d /opt/oracle/instantclient_* | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf
+          sudo ldconfig
 
       - name: Build
         run: cargo build
