@@ -1,6 +1,7 @@
 {
   "$schema": "https://registry.tabularis.dev/manifest.schema.json?kind=driver",
-  "name": "oracle",
+  "id": "oracle",
+  "name": "Oracle",
   "version": "0.1.0",
   "description": "Oracle Database driver for Tabularis (12c+, Free/XE, Autonomous Database, RDS) with multi-schema browsing, query execution, Visual EXPLAIN with runtime statistics, row editing, DDL, views, routines and table/column comments. Requires the Oracle Instant Client.",
   "category": "database",
