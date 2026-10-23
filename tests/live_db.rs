@@ -247,6 +247,16 @@ fn metadata_query_and_crud_round_trip() {
     );
     assert_eq!(page2["rows"], json!([["gamma"]]));
 
+    // Decimals wider than f64 come back with every digit.
+    let wide = p.call(
+        "execute_query",
+        json!({ "query": "SELECT 1234567890123456789012345678.1234567891 AS WIDE, 1234.56 AS NARROW FROM DUAL" }),
+    );
+    assert_eq!(
+        wide["rows"],
+        json!([["1234567890123456789012345678.1234567891", 1234.56]])
+    );
+
     p.call(
         "delete_record",
         json!({ "schema": schema, "table": "TABULARIS_LIVE", "pk_map": { "ID": 1 } }),
