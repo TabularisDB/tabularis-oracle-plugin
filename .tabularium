@@ -14,7 +14,7 @@
     "database-driver"
   ],
   "license": "Apache-2.0",
-  "icon": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/oracle-icon.svg",
+  "icon": "https://raw.githubusercontent.com/TabularisDB/tabularis-oracle-plugin/main/oracle-icon.png",
   "color": "#C74634",
   "screenshots": [
     {
