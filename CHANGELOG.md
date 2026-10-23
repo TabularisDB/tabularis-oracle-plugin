@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-23
+
 ### Fixed
 
 - Decimal `NUMBER` values with more than 15 significant digits (for example
@@ -17,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The manifest declares the stable `id` `oracle` and the display name
   "Oracle".
+- The plugin icon and README banner use the Oracle Database logo; the
+  manifest icon is now `oracle-icon.png`.
 - Bumped `base64` to 0.23 and `serde_json` to 1.0.154.
 - EXPLAIN parser tooling: `tsup` 9, `vitest` 5 and `@types/node` 26.6.5. The
   test typecheck now lists `node` types explicitly, since `vitest` 5 no
@@ -63,5 +67,6 @@ First public release.
   advisories, plus a five-platform release workflow that checks tag/version
   agreement and publishes the npm parser from the same tag.
 
-[Unreleased]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/TabularisDB/tabularis-oracle-plugin/releases/tag/v0.1.0
