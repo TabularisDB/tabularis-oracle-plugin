@@ -12,3 +12,8 @@ updates:
     directory: "/explain"
     schedule:
       interval: "weekly"
+    ignore:
+      # TypeScript 7 (the native port) ships no JS compiler API, which tsup's
+      # declaration build still imports. Revisit once tsup supports it.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]

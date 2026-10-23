@@ -379,3 +379,10 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2024-0436: `paste` is unmaintained (archived upstream, no
+          # CVE). It is a compile-time proc-macro pulled in only by the
+          # `oracle` crate (`cargo tree -i paste`), so none of its code ends
+          # up in the shipped binary. Upstream tracks the replacement in
+          # kubo/rust-oracle#97; drop this ignore once `oracle` stops
+          # depending on it.
+          ignore: RUSTSEC-2024-0436

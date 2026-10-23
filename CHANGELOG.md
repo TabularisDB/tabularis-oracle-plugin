@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Decimal `NUMBER` values with more than 15 significant digits (for example
+  `NUMBER(38,10)`) were rounded through `f64`; they are now returned as exact
+  strings, like integers wider than `i64` already were.
+
+### Changed
+
+- The manifest declares the stable `id` `oracle` and the display name
+  "Oracle".
+- Bumped `base64` to 0.23 and `serde_json` to 1.0.154.
+- EXPLAIN parser tooling: `tsup` 9, `vitest` 5 and `@types/node` 26.6.5. The
+  test typecheck now lists `node` types explicitly, since `vitest` 5 no
+  longer pulls them in. TypeScript stays on 5.9 because TypeScript 7 ships no
+  compiler API for `tsup`'s declaration build; Dependabot ignores its major
+  updates until that changes.
+
+### Security
+
+- The RustSec audit ignores RUSTSEC-2024-0436 (`paste` unmaintained, no CVE).
+  `paste` is a compile-time proc-macro reached only through the `oracle`
+  crate, so none of its code ships in the binary; upstream tracks the
+  replacement in kubo/rust-oracle#97.
+
 ## [0.1.0] - 2026-09-23
 
 First public release.

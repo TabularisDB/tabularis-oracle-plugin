@@ -20,7 +20,7 @@ serde_json = "1"
 # build time (no Oracle SDK needed), and the Oracle Client library (e.g.
 # Instant Client) is loaded dynamically at runtime on first connect.
 oracle = "0.6"
-base64 = "0.22"
+base64 = "0.23"
 
 [profile.release]
 lto = true

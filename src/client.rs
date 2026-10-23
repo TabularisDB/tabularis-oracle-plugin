@@ -269,8 +269,9 @@ fn fetch_cell(row: &Row, i: usize, oracle_type: &OracleType) -> Value {
 }
 
 /// Parse Oracle's text rendering of a number into a JSON number, keeping
-/// integers exact. Integers too large for i64 stay strings rather than losing
-/// precision through f64.
+/// values exact. Integers too large for i64, and decimals with more
+/// significant digits than f64 can round-trip, stay strings rather than
+/// losing precision through f64.
 fn parse_number(s: &str) -> Value {
     if let Ok(i) = s.parse::<i64>() {
         return json!(i);
@@ -279,13 +280,25 @@ fn parse_number(s: &str) -> Value {
         let digits = s.strip_prefix('-').unwrap_or(s);
         !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
     };
-    if is_plain_integer {
+    if is_plain_integer || significant_digits(s) > F64_EXACT_DIGITS {
         return Value::String(s.to_string());
     }
     match s.parse::<f64>() {
         Ok(f) if f.is_finite() => json!(f),
         _ => Value::String(s.to_string()),
     }
+}
+
+/// Any decimal with at most this many significant digits survives a
+/// text -> f64 -> shortest-text round trip unchanged (f64's DBL_DIG).
+const F64_EXACT_DIGITS: usize = 15;
+
+/// Count the significant digits of a decimal's mantissa, ignoring the sign,
+/// the decimal point, leading and trailing zeros and any exponent.
+fn significant_digits(s: &str) -> usize {
+    let mantissa = s.split(['e', 'E']).next().unwrap_or(s);
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    digits.trim_start_matches('0').trim_end_matches('0').len()
 }
 
 // ---------------------------------------------------------------------------
@@ -429,5 +442,16 @@ mod tests {
         let big = "123456789012345678901234567890123456789";
         assert_eq!(parse_number(big), Value::String(big.to_string()));
         assert_eq!(parse_number("1E10"), json!(1e10));
+        assert_eq!(parse_number("-.01"), json!(-0.01));
+        assert_eq!(parse_number("1234.5600"), json!(1234.56));
+        assert_eq!(
+            parse_number("0.000123456789012345"),
+            json!(0.000123456789012345)
+        );
+        // NUMBER(38,10) values beyond f64's precision keep every digit.
+        let wide = "1234567890123456789012345678.1234567891";
+        assert_eq!(parse_number(wide), Value::String(wide.to_string()));
+        let fraction = "0.12345678901234567";
+        assert_eq!(parse_number(fraction), Value::String(fraction.to_string()));
     }
 }
