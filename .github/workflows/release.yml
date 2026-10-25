@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag whose EXPLAIN parser should be published to npm
+        required: true
+        type: string
   push:
     tags:
       - "v*"
@@ -11,10 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
 
       - name: Check tag matches manifest, crate and EXPLAIN package versions
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${RELEASE_TAG#v}"
           TABULARIUM_VERSION=$(jq -r .version .tabularium)
           CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
           EXPLAIN_VERSION=$(jq -r .version explain/package.json)
@@ -49,8 +59,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          # pnpm 11.23 requires Node 22.13 or newer.
-          node-version: "22.13"
+          # tsup 9 requires Node 22.18 or newer on the Node 22 line.
+          node-version: "22.18"
 
       # Typecheck and test the parser before any platform binary is built so a
       # broken parser fails the whole release instead of only the npm half.
@@ -62,6 +72,9 @@ jobs:
           pnpm test
 
   build:
+    # Manual recovery publishes only the missing npm package from an existing
+    # tag; the already published desktop archives are left untouched.
+    if: github.event_name != 'workflow_dispatch'
     name: ${{ matrix.platform-label }}
     needs: validate
     runs-on: ${{ matrix.runner }}
@@ -136,8 +149,8 @@ jobs:
         if: steps.ui.outputs.present == 'true' || steps.explain.outputs.present == 'true'
         uses: actions/setup-node@v7
         with:
-          # pnpm 11.23 requires Node 22.13 or newer.
-          node-version: "22.13"
+          # tsup 9 requires Node 22.18 or newer on the Node 22 line.
+          node-version: "22.18"
 
       - name: Build UI
         if: steps.ui.outputs.present == 'true'
@@ -217,15 +230,18 @@ jobs:
 
   publish-explain:
     name: Publish EXPLAIN parser to npm
-    # Runs only once every platform binary has built, so the npm package and
-    # the GitHub release are cut from the same tag in the same run.
-    needs: build
+    # Tag releases wait for every platform. Manual recovery reuses the existing
+    # tag after the same version, manifest and parser validation gates.
+    needs: [validate, build]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && (needs.build.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -235,7 +251,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "22.13"
+          node-version: "22.18"
           registry-url: "https://registry.npmjs.org"
 
       # npm never accepts a second publish of an existing version, so a re-run

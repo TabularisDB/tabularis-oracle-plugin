@@ -172,7 +172,7 @@ Restart Tabularis (or toggle the plugin in Settings) and **Oracle** appears in t
 
 ## Development
 
-Requires a Rust toolchain, a C compiler (for the bundled ODPI-C), and Node.js 22.13+ with pnpm for the EXPLAIN parser. No Oracle software is needed to build or run the unit tests.
+Requires a Rust toolchain, a C compiler (for the bundled ODPI-C), and Node.js 22.18+ with pnpm for the EXPLAIN parser. No Oracle software is needed to build or run the unit tests.
 
 ```bash
 just build         # EXPLAIN parser bundle + debug build
@@ -227,3 +227,19 @@ See [CHANGELOG.md](CHANGELOG.md).
 ## License
 
 Apache-2.0
+
+### Recovering npm publication
+
+If desktop assets were published but the npm parser publish failed, first verify
+that the package's npm Trusted Publisher authorizes `TabularisDB`, repository
+`tabularis-oracle-plugin`, workflow `release.yml`, without an environment name.
+Then run:
+
+```bash
+gh workflow run release.yml --ref main -f release_tag=v0.1.1
+```
+
+The manual run validates and tests the source at that exact tag, then publishes
+only the missing parser version. It skips versions already present on npm and
+neither rebuilds nor replaces the published desktop assets. Tag-triggered runs
+continue to build and publish all platforms and the parser together.

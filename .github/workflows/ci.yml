@@ -56,8 +56,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          # pnpm 11.23 requires Node 22.13 or newer.
-          node-version: "22.13"
+          # tsup 9 requires Node 22.18 or newer on the Node 22 line.
+          node-version: "22.18"
 
       - name: Install dependencies
         working-directory: explain
@@ -124,7 +124,7 @@ jobs:
           curl -fsSL -o instantclient.zip \
             https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
           sudo unzip -q instantclient.zip -d /opt/oracle
-          ls -d /opt/oracle/instantclient_* | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf
+          find /opt/oracle -maxdepth 1 -type d -name 'instantclient_*' | sudo tee /etc/ld.so.conf.d/oracle-instantclient.conf
           sudo ldconfig
 
       - name: Build
