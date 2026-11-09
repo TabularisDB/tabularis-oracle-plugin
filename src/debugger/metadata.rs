@@ -240,7 +240,13 @@ impl Preview {
             arguments.join(",")
         ));
         for (bind, parameter) in &outputs {
-            sql.push_str(&format!(":{bind} := p{};\n", parameter.position));
+            let variable = format!("p{}", parameter.position);
+            let value = if numeric(&parameter.data_type) {
+                format!("TO_CHAR({variable}, 'TM9', 'NLS_NUMERIC_CHARACTERS=''.,''')")
+            } else {
+                variable
+            };
+            sql.push_str(&format!(":{bind} := {value};\n"));
         }
         sql.push_str("END;");
         Ok(Invocation {

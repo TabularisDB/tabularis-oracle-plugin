@@ -53,6 +53,7 @@ fn inputs_are_bound_and_identifiers_are_quoted() {
     assert!(!sql.contains("DELETE"));
     assert_eq!(inputs[0].1.as_deref(), Some("'); DELETE FROM t; --"));
     assert_eq!(outputs[0].0, "o2");
+    assert!(sql.contains(":o2 := TO_CHAR(p2, 'TM9'"));
 }
 
 #[test]
