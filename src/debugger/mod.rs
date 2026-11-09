@@ -238,13 +238,22 @@ fn execute(id: &Value, params: &Value) -> Result<Value> {
         start_lease_worker();
         return session.initial_stop();
     }
-    let session = registry()
-        .lock()
-        .unwrap()
-        .sessions
-        .get(session_id)
-        .cloned()
-        .ok_or_else(|| invalid("Native debug session not found"))?;
+    let session = {
+        let mut registry = registry().lock().unwrap();
+        if let Some(session) = registry.sessions.get(session_id).cloned() {
+            session
+        } else if action == "stop" && !registry.started.contains(session_id) {
+            // A never-started preview uses its native preview identity for stop.
+            registry.previews.remove(session_id);
+            let unread = unavailable("Execution was never started");
+            return Ok(json!({"kind":"session","version":1,"session":{
+                "session_id":session_id,"revision":0,"execution":"cancelled","transaction":"unknown","resources":"released",
+                "source":unread,"stop":unread,"stack":unread,"variables":unread,"outputs":unread,"breakpoints":unread,"error":null
+            }}));
+        } else {
+            return Err(invalid("Native debug session not found"));
+        }
+    };
     session.command(command)
 }
 fn start_lease_worker() {

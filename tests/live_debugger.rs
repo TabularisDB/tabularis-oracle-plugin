@@ -277,6 +277,17 @@ fn real_debugger_breakpoints_values_exceptions_and_cleanup() {
         return;
     };
     let mut plugin = Plugin::new(fixture.params.clone());
+    let unused=plugin.debug(json!({"action":"preview","target":{"database":fixture.params["database"],"schema":fixture.user,"name":"DBG_SAMPLE","routine_type":"PROCEDURE","identity_args":""},"arguments":[{"position":1,"value":"41"}]}));
+    let discarded = plugin.debug(json!({"action":"stop","session_id":unused["preview_id"]}));
+    assert_eq!(discarded["session"]["resources"], "released");
+    assert!(plugin
+        .debug_raw(
+            json!({"action":"start","preview_id":unused["preview_id"],"session_id":"discarded"})
+        )
+        .get("error")
+        .is_some());
+    fixture.no_sessions("discarded");
+    fixture.unchanged();
     let id = "normal";
     let start = plugin.start("DBG_SAMPLE", id, json!([{"position":1,"value":"41"}]));
     assert!(

@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn discarding_a_preview_is_idempotent_and_prevents_start() {
+    let id = "unused-preview";
+    registry().lock().unwrap().previews.insert(
+        id.into(),
+        (
+            Instant::now(),
+            metadata::Preview {
+                params: ConnectionParams::default(),
+                target: Value::Null,
+                arguments: json!([]),
+                parameters: vec![],
+                source: Value::Null,
+                source_id: "source".into(),
+            },
+        ),
+    );
+    let command = json!({"version":1,"command":{"action":"stop","session_id":id}});
+    for _ in 0..2 {
+        let result = execute(&json!("discard"), &command).unwrap();
+        assert_eq!(result["session"]["session_id"], id);
+        assert_eq!(result["session"]["execution"], "cancelled");
+        assert_eq!(result["session"]["resources"], "released");
+    }
+    assert!(!registry().lock().unwrap().previews.contains_key(id));
+    assert!(execute(&json!("start-discarded"), &json!({"version":1,"command":{"action":"start","preview_id":id,"session_id":"discarded-session"}})).unwrap_err().message.contains("preview expired or not found"));
+}
+
+#[test]
 fn protocol_rejects_unknown_versions_actions_and_raw_sql() {
     for params in [
         json!({"version":2,"command":{"action":"status","session_id":"s"}}),
