@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -137,7 +138,7 @@ jobs:
           ORACLE_TEST_SERVICE: FREEPDB1
           ORACLE_TEST_USER: system
           ORACLE_TEST_PASSWORD: oracle
-        run: cargo test --test live_db -- --test-threads=1
+        run: cargo test --test live_db --test live_debugger -- --test-threads=1 --nocapture
 
   pr-title:
     name: PR title (Conventional Commits)

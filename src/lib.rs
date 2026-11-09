@@ -6,6 +6,7 @@
 //! logic in a library is what lets the REPL exercise the exact same code path.
 
 pub mod client;
+pub mod debugger;
 pub mod error;
 pub mod handlers;
 pub mod models;
