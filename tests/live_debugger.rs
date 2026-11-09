@@ -279,6 +279,12 @@ fn real_debugger_breakpoints_values_exceptions_and_cleanup() {
     let mut plugin = Plugin::new(fixture.params.clone());
     let id = "normal";
     let start = plugin.start("DBG_SAMPLE", id, json!([{"position":1,"value":"41"}]));
+    assert!(
+        start["session"]["stop"]["value"]["line"]
+            .as_u64()
+            .is_some_and(|line| (1..=4).contains(&line)),
+        "initial stop must precede the routine's INSERT: {start}"
+    );
     let source = start["session"]["source"]["value"]["source_id"].clone();
     let bp=plugin.debug(json!({"action":"set_breakpoints","session_id":id,"breakpoints":[{"source_id":source,"line":6}]}));
     assert_eq!(bp["session"]["breakpoints"]["state"], "available");

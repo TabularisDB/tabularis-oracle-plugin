@@ -376,9 +376,10 @@ fn event(control: &mut Control, flags: Option<&str>) -> Result<()> {
         .connection
         .as_ref()
         .ok_or_else(|| invalid("Native debugger resources have been released"))?;
+    let info = "DBMS_DEBUG.INFO_GETSTACKDEPTH + DBMS_DEBUG.INFO_GETLINEINFO";
     let call = flags
-        .map(|f| format!("DBMS_DEBUG.CONTINUE(r, {f})"))
-        .unwrap_or_else(|| "DBMS_DEBUG.SYNCHRONIZE(r)".into());
+        .map(|f| format!("DBMS_DEBUG.CONTINUE(r, {f}, {info})"))
+        .unwrap_or_else(|| format!("DBMS_DEBUG.SYNCHRONIZE(r, {info})"));
     let sql = format!("DECLARE r DBMS_DEBUG.RUNTIME_INFO; n PLS_INTEGER; BEGIN n:={call}; :code:=n; :terminated:=NVL(r.terminated,0); :line:=NVL(r.line#,0); :owner:=r.program.owner; :name:=r.program.name; :timed_out:=CASE WHEN n=DBMS_DEBUG.ERROR_TIMEOUT THEN 1 ELSE 0 END; END;");
     let statement = connection.execute_named(
         &sql,
