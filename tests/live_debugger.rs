@@ -295,6 +295,12 @@ fn real_debugger_breakpoints_values_exceptions_and_cleanup() {
             .len(),
         1
     );
+    let replaced=plugin.debug(json!({"action":"set_breakpoints","session_id":id,"breakpoints":[{"source_id":source,"line":6},{"source_id":source,"line":6}]}));
+    assert_eq!(replaced["session"]["breakpoints"]["state"], "available");
+    assert_eq!(
+        replaced["session"]["breakpoints"]["value"],
+        bp["session"]["breakpoints"]["value"]
+    );
     let stopped = plugin.debug(json!({"action":"continue","session_id":id}));
     assert_eq!(stopped["session"]["stop"]["value"]["line"], 6);
     let stack = plugin.debug(json!({"action":"read_stack","session_id":id}));

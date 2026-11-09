@@ -481,44 +481,72 @@ fn set_breakpoints(control: &mut Control, preview: &Preview, command: &Value) ->
         .connection
         .as_ref()
         .ok_or_else(|| invalid("Debugger resources released"))?;
+    let owner = text(&preview.target, "schema")?;
+    let name = text(&preview.target, "name")?;
+    control.snapshot["breakpoints"] = replace_breakpoints(
+        &mut control.breakpoints,
+        requested,
+        |id| {
+            let result = connection.execute(
+                "BEGIN :code:=DBMS_DEBUG.DELETE_BREAKPOINT(:id); END;",
+                &[&OracleType::Number(10, 0), &id],
+            )?;
+            let code: i64 = result.bind_value("code")?;
+            if code == 0 {
+                Ok(())
+            } else {
+                Err(invalid(format!("Native breakpoint status {code}")))
+            }
+        },
+        |bp| {
+            let line = bp["line"].as_i64().unwrap();
+            let result = connection.execute_named("DECLARE p DBMS_DEBUG.PROGRAM_INFO; BEGIN p.owner:=:owner; p.name:=:name; p.namespace:=DBMS_DEBUG.NAMESPACE_PKGSPEC_OR_TOPLEVEL; :code:=DBMS_DEBUG.SET_BREAKPOINT(p,:line,:bp); END;",
+                &[("owner", &owner), ("name", &name), ("line", &line),
+                    ("code", &OracleType::Number(10,0)), ("bp", &OracleType::Number(10,0))])?;
+            let code: i64 = result.bind_value("code")?;
+            if code == 0 {
+                Ok(result.bind_value("bp")?)
+            } else {
+                Err(invalid(format!("Native breakpoint status {code}")))
+            }
+        },
+    );
+    Ok(())
+}
+
+pub(super) fn replace_breakpoints(
+    tracked: &mut Vec<(i64, Value)>,
+    requested: &[Value],
+    mut remove: impl FnMut(i64) -> Result<()>,
+    mut add: impl FnMut(&Value) -> Result<i64>,
+) -> Value {
     let mut failures = vec![];
-    let mut retained = vec![];
-    for (id, bp) in control.breakpoints.drain(..) {
-        let result = connection.execute(
-            "BEGIN :code:=DBMS_DEBUG.DELETE_BREAKPOINT(:id); END;",
-            &[&OracleType::Number(10, 0), &id],
-        )?;
-        if result.bind_value::<_, i64>("code")? != 0 {
-            failures.push(format!("Could not remove breakpoint {id}"));
-            retained.push((id, bp));
+    // Keep every native handle until removal is confirmed, even after a call fails.
+    tracked.retain(|(id, _)| match remove(*id) {
+        Ok(()) => false,
+        Err(error) => {
+            failures.push(format!(
+                "Could not confirm removal of breakpoint {id}: {}",
+                error.message
+            ));
+            true
+        }
+    });
+    for (index, bp) in requested.iter().enumerate() {
+        if requested[..index].contains(bp) || tracked.iter().any(|(_, existing)| existing == bp) {
+            continue;
+        }
+        match add(bp) {
+            Ok(id) => tracked.push((id, bp.clone())),
+            Err(error) => failures.push(format!("Line {}: {}", bp["line"], error.message)),
         }
     }
-    control.breakpoints = retained;
-    for bp in requested {
-        let line = bp["line"].as_i64().unwrap();
-        let result = connection.execute_named("DECLARE p DBMS_DEBUG.PROGRAM_INFO; BEGIN p.owner:=:owner; p.name:=:name; p.namespace:=DBMS_DEBUG.NAMESPACE_PKGSPEC_OR_TOPLEVEL; :code:=DBMS_DEBUG.SET_BREAKPOINT(p,:line,:bp); END;",
-            &[("owner", &text(&preview.target,"schema")?), ("name", &text(&preview.target,"name")?), ("line", &line),
-                ("code", &OracleType::Number(10,0)), ("bp", &OracleType::Number(10,0))])?;
-        let code: i64 = result.bind_value("code")?;
-        if code == 0 {
-            control
-                .breakpoints
-                .push((result.bind_value("bp")?, bp.clone()));
-        } else {
-            failures.push(format!("Line {line}: native breakpoint status {code}"));
-        }
-    }
-    let confirmed: Vec<_> = control
-        .breakpoints
-        .iter()
-        .map(|(_, bp)| bp.clone())
-        .collect();
-    control.snapshot["breakpoints"] = if failures.is_empty() {
+    let confirmed: Vec<_> = tracked.iter().map(|(_, bp)| bp.clone()).collect();
+    if failures.is_empty() {
         available(json!(confirmed))
     } else {
         json!({"state":"partial","value":confirmed,"reason":failures.join("; ")})
-    };
-    Ok(())
+    }
 }
 
 fn read_stack(control: &mut Control) -> Result<()> {
