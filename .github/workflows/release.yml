@@ -99,7 +99,7 @@ jobs:
             archive: zip
             binary-suffix: ""
           - platform-label: darwin-arm64
-            runner: macos-14
+            runner: macos-latest
             target: aarch64-apple-darwin
             archive: zip
             binary-suffix: ""
