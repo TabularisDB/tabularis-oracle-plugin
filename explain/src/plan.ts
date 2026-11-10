@@ -1,3 +1,4 @@
+import { parseOracleText } from './text';
 import type { ExplainNode, ExplainPlan } from "@tabularis/explain";
 
 /**
@@ -158,6 +159,7 @@ function parsePayload(payload: string): OraclePlanPayload {
  * `V$SQL_PLAN_STATISTICS_ALL` for analyzed plans) into the shared plan model.
  */
 export function parseOraclePlan(payload: string): ExplainPlan {
+  if (!/^\s*\{/.test(payload) && /\|\s*Id\s*\|\s*Operation\s*\|/i.test(payload)) return parseOracleText(payload);
   const { plan: rows, statistics, text } = parsePayload(payload);
   if (rows.length === 0) {
     throw new Error("Oracle plan payload contains no plan operations");

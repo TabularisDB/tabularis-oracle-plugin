@@ -4,6 +4,10 @@ Oracle Database execution-plan parser for Tabularis Visual EXPLAIN. This
 package is maintained and versioned with the
 [Tabularis Oracle plugin](https://github.com/TabularisDB/tabularis-oracle-plugin).
 
+The parser accepts tabular `DBMS_XPLAN.DISPLAY` and `DISPLAY_CURSOR` reports
+as well as structured plugin payloads. Report detail depends on the columns
+and precision Oracle includes.
+
 ## Install
 
 ```bash

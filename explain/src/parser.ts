@@ -12,7 +12,7 @@ export const oracleExplainParser: RegisteredExplainParser = {
   // Oracle's PLAN_TABLE column names. The parser still validates fully.
   sniff: (payload) => {
     const head = payload.slice(0, 4096);
-    return (
+    return /\|\s*Id\s*\|\s*Operation\s*\|/i.test(payload) || (
       /^\s*\{/.test(head) &&
       /"plan"\s*:\s*\[/.test(head) &&
       head.includes('"qblock_name"')

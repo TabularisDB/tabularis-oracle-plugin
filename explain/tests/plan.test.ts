@@ -108,3 +108,40 @@ describe("parseOraclePlan", () => {
     ).toThrow(/numeric 'id'/);
   });
 });
+
+
+describe("DBMS_XPLAN text", () => {
+  it("parses captured Oracle plans with their hierarchy and runtime rows", async () => {
+    const { parseOracleText } = await import("../src/text");
+    const fixture = JSON.parse(await readFile(new URL("./fixtures/hash-join-analyzed.json", import.meta.url), "utf8"));
+    const payload = JSON.parse(fixture.payload);
+    const plan = parseOracleText(payload.text);
+    expect(plan.root.node_type).toBe("SELECT STATEMENT");
+    expect(plan.root.children[0].node_type).toBe("SORT GROUP BY NOSORT");
+    expect(plan.root.actual_rows).toBe(1);
+    expect(plan.has_analyze_data).toBe(true);
+  });
+});
+
+
+describe("captured DBMS_XPLAN report compatibility", () => {
+  it.each(["hash-join-analyzed", "hash-join-estimated", "index-unique-scan", "json-column-analyzed", "nested-loops-analyzed", "view-sort-estimated"])("preserves operation hierarchy in %s", async (name) => {
+    const { parseOracleText } = await import("../src/text");
+    const fixture = JSON.parse(await readFile(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
+    const payload = JSON.parse(fixture.payload);
+    const expected = parseOraclePlan(fixture.payload);
+    const actual = parseOracleText(payload.text);
+    const shape = (node: typeof actual.root): unknown => [node.node_type, node.relation, node.children.map(shape)];
+    expect(shape(actual.root)).toEqual(shape(expected.root));
+  });
+});
+
+
+it("rejects truncated DBMS_XPLAN tables", async () => {
+  const { parseOracleText } = await import("../src/text");
+  const fixture = JSON.parse(await readFile(new URL("./fixtures/hash-join-analyzed.json", import.meta.url), "utf8"));
+  const text = JSON.parse(fixture.payload).text as string;
+  const lines = text.split("\n");
+  const operation = lines.findIndex((line) => /\|\s*0\s*\|/.test(line));
+  expect(() => parseOracleText(lines.slice(0, operation + 1).join("\n"))).toThrow(/incomplete/);
+});
