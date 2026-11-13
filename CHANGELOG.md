@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-13
+
+### Changed
+
+- Maintenance release of the Oracle driver and EXPLAIN parser with aligned
+  package versions. No database-driver behavior changes since 0.1.2.
+
 ## [0.1.2] - 2026-11-10
 
 ### Added
@@ -73,6 +80,8 @@ First public release.
   advisories, plus a five-platform release workflow that checks tag/version
   agreement and publishes the npm parser from the same tag.
 
-[Unreleased]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/TabularisDB/tabularis-oracle-plugin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/TabularisDB/tabularis-oracle-plugin/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 [package]
 name = "oracle-plugin"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Tabularis driver plugin for Oracle Database (via ODPI-C / Oracle Instant Client)"
 license = "Apache-2.0"
