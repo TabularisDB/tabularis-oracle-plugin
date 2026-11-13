@@ -45,7 +45,9 @@ fn main() {
 
         let request = serde_json::from_str::<Value>(trimmed).ok();
         let method = request.as_ref().and_then(|v| v["method"].as_str());
-        if method == Some("$/cancelRequest") {
+        // Host timeout/abort sends a JSON-RPC notification `cancel` (no top-level
+        // id). `$/cancelRequest` is accepted as an alias. Do not reply.
+        if matches!(method, Some("cancel") | Some("$/cancelRequest")) {
             debugger::cancel_request(&request.unwrap()["params"]["id"]);
         } else if method == Some("routine_debug") {
             let request = request.unwrap();

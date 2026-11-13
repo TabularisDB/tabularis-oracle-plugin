@@ -40,6 +40,7 @@ struct Registry {
     previews: HashMap<String, (Instant, metadata::Preview)>,
     sessions: HashMap<String, Arc<session::Session>>,
     started: HashSet<String>,
+    pending_starts: HashMap<String, Arc<AtomicBool>>,
     requests: HashMap<String, Request>,
 }
 static CLOSING: AtomicBool = AtomicBool::new(false);
@@ -75,16 +76,69 @@ pub fn cancel_request(id: &Value) {
         let registry = registry().lock().unwrap();
         registry.requests.get(&id.to_string()).and_then(|request| {
             request.cancelled.store(true, Ordering::Release);
-            request
-                .session
-                .as_ref()
-                .and_then(|id| registry.sessions.get(id).cloned())
+            let session_id = request.session.as_ref()?;
+            if let Some(pending) = registry.pending_starts.get(session_id) {
+                pending.store(true, Ordering::Release);
+            }
+            registry.sessions.get(session_id).cloned()
         })
     };
     if let Some(session) = session {
         std::thread::spawn(move || {
             let _ = session.stop();
         });
+    }
+}
+fn cancelled_session(session_id: &str) -> Value {
+    let unread = unavailable("Execution was never started");
+    json!({"kind":"session","version":1,"session":{
+        "session_id":session_id,"revision":0,"execution":"cancelled","transaction":"unknown","resources":"released",
+        "source":unread,"stop":unread,"stack":unread,"variables":unread,"outputs":unread,"breakpoints":unread,"error":null
+    }})
+}
+fn pending_stopped(session_id: &str) -> bool {
+    registry()
+        .lock()
+        .unwrap()
+        .pending_starts
+        .get(session_id)
+        .is_some_and(|flag| flag.load(Ordering::Acquire))
+}
+fn take_pending_stop(session_id: &str) -> bool {
+    registry()
+        .lock()
+        .unwrap()
+        .pending_starts
+        .remove(session_id)
+        .is_some_and(|flag| flag.load(Ordering::Acquire))
+}
+fn start_abandoned(session_id: &str, cancelled: &AtomicBool) -> bool {
+    cancelled.load(Ordering::Acquire)
+        || CLOSING.load(Ordering::Acquire)
+        || pending_stopped(session_id)
+}
+#[cfg(test)]
+type PrepareHold = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+#[cfg(test)]
+fn prepare_holds() -> &'static Mutex<HashMap<String, PrepareHold>> {
+    static HOLDS: OnceLock<Mutex<HashMap<String, PrepareHold>>> = OnceLock::new();
+    HOLDS.get_or_init(Default::default)
+}
+#[cfg(test)]
+fn hold_prepare(session_id: &str) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    prepare_holds()
+        .lock()
+        .unwrap()
+        .insert(session_id.to_string(), (entered_tx, release_rx));
+    (entered_rx, release_tx)
+}
+#[cfg(test)]
+fn wait_held_prepare(session_id: &str) {
+    if let Some((entered, release)) = prepare_holds().lock().unwrap().remove(session_id) {
+        let _ = entered.send(());
+        let _ = release.recv();
     }
 }
 fn check_keys(value: &Value, allowed: &[&str]) -> Result<()> {
@@ -222,13 +276,37 @@ fn execute(id: &Value, params: &Value) -> Result<Value> {
             let preview = preview.clone();
             // Reserve before connection setup: failed starts are never replayed.
             registry.started.insert(session_id.to_string());
+            registry
+                .pending_starts
+                .insert(session_id.to_string(), Arc::new(AtomicBool::new(false)));
             preview
         };
-        let session = session::Session::prepare(session_id, preview_id.to_string(), preview)?;
+        #[cfg(test)]
+        wait_held_prepare(session_id);
+        if start_abandoned(session_id, &cancelled) {
+            take_pending_stop(session_id);
+            return Ok(cancelled_session(session_id));
+        }
+        let session = match session::Session::prepare(session_id, preview_id.to_string(), preview) {
+            Ok(session) => session,
+            Err(error) => {
+                if take_pending_stop(session_id) || start_abandoned(session_id, &cancelled) {
+                    return Ok(cancelled_session(session_id));
+                }
+                return Err(error);
+            }
+        };
         {
             let mut registry = registry().lock().unwrap();
-            if cancelled.load(Ordering::Acquire) || CLOSING.load(Ordering::Acquire) {
-                return Err(invalid("Debugger start cancelled before execution"));
+            let pending_stop = registry
+                .pending_starts
+                .remove(session_id)
+                .is_some_and(|flag| flag.load(Ordering::Acquire));
+            let rpc_cancelled =
+                cancelled.load(Ordering::Acquire) || CLOSING.load(Ordering::Acquire);
+            if pending_stop || rpc_cancelled {
+                drop(registry);
+                return session.stop();
             }
             registry
                 .sessions
@@ -242,14 +320,14 @@ fn execute(id: &Value, params: &Value) -> Result<Value> {
         let mut registry = registry().lock().unwrap();
         if let Some(session) = registry.sessions.get(session_id).cloned() {
             session
-        } else if action == "stop" && !registry.started.contains(session_id) {
-            // A never-started preview uses its native preview identity for stop.
-            registry.previews.remove(session_id);
-            let unread = unavailable("Execution was never started");
-            return Ok(json!({"kind":"session","version":1,"session":{
-                "session_id":session_id,"revision":0,"execution":"cancelled","transaction":"unknown","resources":"released",
-                "source":unread,"stop":unread,"stack":unread,"variables":unread,"outputs":unread,"breakpoints":unread,"error":null
-            }}));
+        } else if action == "stop" {
+            if let Some(pending) = registry.pending_starts.get(session_id) {
+                pending.store(true, Ordering::Release);
+            } else if !registry.started.contains(session_id) {
+                // A never-started preview uses its native preview identity for stop.
+                registry.previews.remove(session_id);
+            }
+            return Ok(cancelled_session(session_id));
         } else {
             return Err(invalid("Native debug session not found"));
         }

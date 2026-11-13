@@ -180,3 +180,130 @@ fn breakpoint_addition_failure_reports_successful_changes_in_snapshot() {
     assert_eq!(result["value"], json!([bp(2), bp(4)]));
     assert!(result["reason"].as_str().unwrap().contains("Line 3"));
 }
+
+fn dummy_preview() -> metadata::Preview {
+    metadata::Preview {
+        params: ConnectionParams::default(),
+        target: Value::Null,
+        arguments: json!([]),
+        parameters: vec![],
+        source: Value::Null,
+        source_id: "source".into(),
+    }
+}
+
+fn insert_preview(id: &str) {
+    registry()
+        .lock()
+        .unwrap()
+        .previews
+        .insert(id.into(), (Instant::now(), dummy_preview()));
+}
+
+#[test]
+fn stop_against_a_reserved_start_is_recorded_instead_of_not_found() {
+    let id = "reserved-start";
+    {
+        let mut registry = registry().lock().unwrap();
+        registry.started.insert(id.into());
+        registry
+            .pending_starts
+            .insert(id.into(), Arc::new(AtomicBool::new(false)));
+    }
+    let result = execute(
+        &json!("stop-reserved"),
+        &json!({"version":1,"command":{"action":"stop","session_id":id}}),
+    )
+    .unwrap();
+    assert_eq!(result["session"]["execution"], "cancelled");
+    assert_eq!(result["session"]["resources"], "released");
+    assert!(registry()
+        .lock()
+        .unwrap()
+        .pending_starts
+        .get(id)
+        .unwrap()
+        .load(Ordering::Acquire));
+    let continue_err = execute(
+        &json!("continue-reserved"),
+        &json!({"version":1,"command":{"action":"continue","session_id":id}}),
+    )
+    .unwrap_err();
+    assert!(continue_err
+        .message
+        .contains("Native debug session not found"));
+}
+
+#[test]
+fn stop_during_prepare_prevents_activation_and_releases_resources() {
+    let preview_id = "held-preview";
+    let session_id = "held-prepare";
+    insert_preview(preview_id);
+    let (entered, release) = hold_prepare(session_id);
+    let started = std::thread::spawn(move || {
+        execute(
+            &json!("start-held"),
+            &json!({"version":1,"command":{"action":"start","preview_id":preview_id,"session_id":session_id}}),
+        )
+    });
+    entered
+        .recv_timeout(Duration::from_secs(2))
+        .expect("start must reach preparation");
+    let stopped = execute(
+        &json!("stop-held"),
+        &json!({"version":1,"command":{"action":"stop","session_id":session_id}}),
+    )
+    .unwrap();
+    assert_eq!(stopped["session"]["execution"], "cancelled");
+    assert_eq!(stopped["session"]["resources"], "released");
+    release.send(()).unwrap();
+    let started = started.join().unwrap().unwrap();
+    assert_eq!(started["session"]["execution"], "cancelled");
+    assert_eq!(started["session"]["resources"], "released");
+    let registry = registry().lock().unwrap();
+    assert!(!registry.sessions.contains_key(session_id));
+    assert!(registry.started.contains(session_id));
+    assert!(!registry.pending_starts.contains_key(session_id));
+    drop(registry);
+    let replay = execute(
+        &json!("replay-held"),
+        &json!({"version":1,"command":{"action":"start","preview_id":preview_id,"session_id":session_id}}),
+    )
+    .unwrap_err();
+    assert!(replay
+        .message
+        .contains("Session identity was already started"));
+}
+
+#[test]
+fn cancel_request_marks_a_pending_start() {
+    let request_id = json!(4242);
+    let session_id = "cancel-pending";
+    {
+        let mut registry = registry().lock().unwrap();
+        registry.started.insert(session_id.into());
+        registry
+            .pending_starts
+            .insert(session_id.into(), Arc::new(AtomicBool::new(false)));
+        registry.requests.insert(
+            request_id.to_string(),
+            Request {
+                cancelled: Arc::new(AtomicBool::new(false)),
+                session: Some(session_id.into()),
+            },
+        );
+    }
+    cancel_request(&request_id);
+    let registry = registry().lock().unwrap();
+    assert!(registry
+        .requests
+        .get(&request_id.to_string())
+        .unwrap()
+        .cancelled
+        .load(Ordering::Acquire));
+    assert!(registry
+        .pending_starts
+        .get(session_id)
+        .unwrap()
+        .load(Ordering::Acquire));
+}
