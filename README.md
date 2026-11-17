@@ -214,6 +214,51 @@ src/
 explain/                 # TypeScript plan parser (plugin IIFE + npm package)
 ```
 
+## Native routine debugging
+
+The optional `routine_debug: 1` capability implements the host's versioned
+debugger RPC. It requires a Tabularis build with routine-debugger support;
+older hosts ignore the capability. Normal SQL/query connections are unaffected.
+
+The first supported targets are standalone procedures and functions with scalar
+NUMBER/character IN, INOUT, OUT and return values on Oracle 19c+ installations
+where DBMS_DEBUG is available. Packaged overloads, collections, objects, dates
+and variable assignments are outside this first implementation and fail with an
+explanation during preview. Variable watches accept scalar identifiers only.
+
+The routine must already be valid and compiled with debug information. The
+account needs DEBUG CONNECT SESSION plus EXECUTE/DEBUG access to the target.
+The debugger never grants privileges, compiles routines or installs helpers.
+Oracle deprecates [DBMS_DEBUG](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_DEBUG.html);
+deployment policies may disable it. No inbound JDWP port or Java debugger is used.
+
+Start is explicit and stops at the selected routine entry. Dedicated target and
+controller connections keep step, breakpoints, stack, scalar watches and stop
+separate from the ordinary autocommit cache. Inputs are bound values. Starts are
+deduplicated, including failed/uncertain starts; changing source requires a new
+preview. Stop, RPC cancellation, stdin EOF and a 120-second abandoned-session
+lease interrupt execution and release both connections. Native target timeouts
+use abort-on-timeout, never resume-on-timeout.
+
+Execution, transaction outcome and resource release are reported independently.
+Remaining uncommitted work is rolled back during cleanup, but routines can
+COMMIT, run DDL/autonomous transactions or cause external effects. The overall
+transaction outcome therefore remains conservatively unknown. Numeric values
+and OUT/return values are text to preserve precision; missing native information
+is reported as unavailable/partial/stale rather than fabricated.
+
+`tests/live_debugger.rs` exercises the real stdio binary against the CI Oracle
+Free service, recording database/client versions and checking normal completion,
+exceptions, all step modes, breakpoints/watches, OUT/return values, duplicate
+start, concurrent stop, EOF, rollback and absence of native target/controller
+sessions. Run it against a **disposable database**: the fixture explicitly creates
+and removes its own test account, grants and routines using the configured admin.
+
+```bash
+ORACLE_TEST_HOST=127.0.0.1 ORACLE_CLIENT_LIB_DIR=/path/to/instantclient \
+  cargo test --test live_debugger -- --test-threads=1 --nocapture
+```
+
 ## Contributing
 
 Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, ...), and CI checks them. Add one `prerelease:alpha`, `prerelease:beta`, `prerelease:rc` or `prerelease:stable` label so the version-suggestion job can compute the next tag.

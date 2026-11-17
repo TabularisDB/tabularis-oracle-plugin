@@ -18,6 +18,7 @@ pub fn handle_line(line: &str) -> Value {
     let params = request.get("params").cloned().unwrap_or(Value::Null);
 
     match method {
+        "routine_debug" => crate::debugger::handle(id, &params),
         // Lifecycle.
         "initialize" => handlers::initialize(id, &params),
         "ping" => handlers::query::ping(id, &params),

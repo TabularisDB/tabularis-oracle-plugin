@@ -85,6 +85,7 @@
     "schemas": true,
     "views": true,
     "routines": true,
+    "routine_debug": 1,
     "file_based": false,
     "folder_based": false,
     "connection_string": true,
