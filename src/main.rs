@@ -1,6 +1,10 @@
 //! Entry point: read JSON-RPC lines from stdin, dispatch, write responses.
 //!
-//! One JSON-RPC request per line in, one response per line out. Everything
+//! One JSON-RPC request per line in, one response per line out. stdin is read
+//! on the main thread so `cancel` and `routine_debug` (including Stop) are
+//! dispatched immediately; ordinary requests are queued to one sequential
+//! worker, which preserves their order but cannot block Stop when a query
+//! waits on a row lock held by a paused debug target. Everything
 //! that can fail is turned into a JSON-RPC error response rather than a panic,
 //! so a single bad request never takes the plugin down.
 
@@ -12,7 +16,7 @@ use oracle_plugin::{debugger, rpc};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 static OUTPUT_FAILED: AtomicBool = AtomicBool::new(false);
 
 fn write_response(out: &Arc<Mutex<io::Stdout>>, response: Value) -> bool {
@@ -32,6 +36,19 @@ fn write_response(out: &Arc<Mutex<io::Stdout>>, response: Value) -> bool {
 fn main() {
     let stdin = io::stdin();
     let out = Arc::new(Mutex::new(io::stdout()));
+    let (queue, ordinary) = mpsc::channel::<String>();
+    let worker = {
+        let out = out.clone();
+        std::thread::spawn(move || {
+            for line in ordinary {
+                if OUTPUT_FAILED.load(Ordering::Acquire)
+                    || !write_response(&out, rpc::handle_line(&line))
+                {
+                    break;
+                }
+            }
+        })
+    };
 
     for line in stdin.lock().lines() {
         if OUTPUT_FAILED.load(Ordering::Acquire) {
@@ -66,11 +83,13 @@ fn main() {
                     }
                 }
             }
-        } else {
-            if !write_response(&out, rpc::handle_line(trimmed)) {
-                break;
-            }
+        } else if queue.send(trimmed.to_string()).is_err() {
+            break;
         }
     }
+    // Release debug targets first so a queued query blocked on their locks can
+    // finish, then drain the ordinary queue.
+    drop(queue);
     debugger::shutdown();
+    let _ = worker.join();
 }

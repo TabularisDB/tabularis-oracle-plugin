@@ -96,9 +96,33 @@ pub fn read(conn: &Connection, params: ConnectionParams, command: &Value) -> Res
     }
     let row = conn.query_row("SELECT o.object_id, TO_CHAR(o.last_ddl_time,'YYYYMMDDHH24MISS'), s.plsql_debug \
         FROM all_objects o JOIN all_plsql_object_settings s ON s.owner=o.owner AND s.name=o.object_name AND s.type=o.object_type \
-        WHERE o.owner=:1 AND o.object_name=:2 AND o.object_type=:3 AND o.status='VALID'", &[&owner, &name, &kind])?;
+        WHERE o.owner=:1 AND o.object_name=:2 AND o.object_type=:3 AND o.status='VALID'", &[&owner, &name, &kind])
+        .map_err(|error| match error.kind() {
+            oracle::ErrorKind::NoDataFound => invalid(format!(
+                "{} {owner}.{name} was not found, is not visible to this account, or is invalid (recompile it first)",
+                kind.to_lowercase()
+            )),
+            _ => error.into(),
+        })?;
     if row.get::<_, String>(2)? != "TRUE" {
         return Err(invalid("The routine has no debug information. Compile it with DEBUG explicitly outside the debugger; no recompilation is performed automatically"));
+    }
+    // Without DEBUG access Oracle never stops inside the routine, so Start would
+    // run it to completion. Refuse up front instead of breaking "stop at entry".
+    let debuggable: i64 = conn
+        .query_row_named(
+            "SELECT CASE WHEN :owner = USER \
+               OR EXISTS (SELECT 1 FROM session_privs WHERE privilege = 'DEBUG ANY PROCEDURE') \
+               OR EXISTS (SELECT 1 FROM all_tab_privs WHERE table_schema = :owner AND table_name = :name \
+                  AND privilege = 'DEBUG' AND (grantee IN (USER, 'PUBLIC') OR grantee IN (SELECT role FROM session_roles))) \
+             THEN 1 ELSE 0 END FROM dual",
+            &[("owner", &owner), ("name", &name)],
+        )?
+        .get(0)?;
+    if debuggable != 1 {
+        return Err(invalid(format!(
+            "Missing DEBUG privilege on {owner}.{name}. Debugging another schema's routine requires the object DEBUG privilege or DEBUG ANY PROCEDURE; without it execution cannot stop at entry, so it is not started"
+        )));
     }
     let object_id: i64 = row.get(0)?;
     let modified: String = row.get(1)?;
@@ -187,9 +211,9 @@ pub fn read(conn: &Connection, params: ConnectionParams, command: &Value) -> Res
 impl Preview {
     pub fn response(&self, id: &str) -> Value {
         json!({"kind":"preview","version":1,"preview_id":id,"target":self.target,"arguments":self.arguments,"source":self.source,
-            "warnings":["Oracle 19c+ standalone scalar routines only. DEBUG CONNECT SESSION and object DEBUG/EXECUTE privileges and existing COMPILE DEBUG information are required.",
+            "warnings":["Standalone scalar routines only; validated on Oracle 23ai/26ai (DBMS_DEBUG is also available on 19c but untested). DEBUG CONNECT SESSION, EXECUTE plus DEBUG on the routine (owner, object DEBUG or DEBUG ANY PROCEDURE) and existing COMPILE DEBUG information are required.",
                 "Execution uses an isolated session with autocommit disabled. Routine COMMIT, DDL, autonomous transactions and external effects cannot be undone by stopping. Remaining uncommitted work is rolled back at cleanup; overall transaction outcome is conservatively unknown.",
-                "An abandoned debugger expires after 120 seconds. Numeric values and OUT/return values are represented as text to preserve precision. No grants, compilation or persistent helper objects are installed."]})
+                "An abandoned debugger expires after 120 seconds while running, or 30 minutes while paused at a stop. Numeric values and OUT/return values are represented as text to preserve precision. No grants, compilation or persistent helper objects are installed."]})
     }
 
     pub fn invocation(&self) -> Result<Invocation> {

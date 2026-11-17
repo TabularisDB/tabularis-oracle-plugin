@@ -25,7 +25,7 @@ fn discarding_a_preview_is_idempotent_and_prevents_start() {
         assert_eq!(result["session"]["resources"], "released");
     }
     assert!(!registry().lock().unwrap().previews.contains_key(id));
-    assert!(execute(&json!("start-discarded"), &json!({"version":1,"command":{"action":"start","preview_id":id,"session_id":"discarded-session"}})).unwrap_err().message.contains("preview expired or not found"));
+    assert!(execute(&json!("start-discarded"), &json!({"version":1,"command":{"action":"start","preview_id":id,"session_id":"discarded-session"}})).unwrap_err().message.contains("or not found"));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn stop_against_a_reserved_start_is_recorded_instead_of_not_found() {
     let id = "reserved-start";
     {
         let mut registry = registry().lock().unwrap();
-        registry.started.insert(id.into());
+        registry.started.insert(id.into(), Instant::now());
         registry
             .pending_starts
             .insert(id.into(), Arc::new(AtomicBool::new(false)));
@@ -216,7 +216,7 @@ fn stop_against_a_reserved_start_is_recorded_instead_of_not_found() {
     )
     .unwrap();
     assert_eq!(result["session"]["execution"], "cancelled");
-    assert_eq!(result["session"]["resources"], "released");
+    assert_eq!(result["session"]["resources"], "unknown");
     assert!(registry()
         .lock()
         .unwrap()
@@ -255,14 +255,20 @@ fn stop_during_prepare_prevents_activation_and_releases_resources() {
     )
     .unwrap();
     assert_eq!(stopped["session"]["execution"], "cancelled");
-    assert_eq!(stopped["session"]["resources"], "released");
+    assert_eq!(stopped["session"]["resources"], "unknown");
     release.send(()).unwrap();
     let started = started.join().unwrap().unwrap();
     assert_eq!(started["session"]["execution"], "cancelled");
     assert_eq!(started["session"]["resources"], "released");
+    let status = execute(
+        &json!("status-held"),
+        &json!({"version":1,"command":{"action":"status","session_id":session_id}}),
+    )
+    .unwrap();
+    assert_eq!(status["session"]["resources"], "released");
     let registry = registry().lock().unwrap();
     assert!(!registry.sessions.contains_key(session_id));
-    assert!(registry.started.contains(session_id));
+    assert!(registry.started.contains_key(session_id));
     assert!(!registry.pending_starts.contains_key(session_id));
     drop(registry);
     let replay = execute(
@@ -281,7 +287,7 @@ fn cancel_request_marks_a_pending_start() {
     let session_id = "cancel-pending";
     {
         let mut registry = registry().lock().unwrap();
-        registry.started.insert(session_id.into());
+        registry.started.insert(session_id.into(), Instant::now());
         registry
             .pending_starts
             .insert(session_id.into(), Arc::new(AtomicBool::new(false)));
@@ -290,6 +296,7 @@ fn cancel_request_marks_a_pending_start() {
             Request {
                 cancelled: Arc::new(AtomicBool::new(false)),
                 session: Some(session_id.into()),
+                interrupts: true,
             },
         );
     }
@@ -306,4 +313,60 @@ fn cancel_request_marks_a_pending_start() {
         .get(session_id)
         .unwrap()
         .load(Ordering::Acquire));
+}
+
+#[test]
+fn a_preview_is_consumed_by_its_first_start() {
+    let preview_id = "single-use-preview";
+    insert_preview(preview_id);
+    let (entered, release) = hold_prepare("single-use-a");
+    let first = std::thread::spawn(move || {
+        execute(
+            &json!("start-single-a"),
+            &json!({"version":1,"command":{"action":"start","preview_id":preview_id,"session_id":"single-use-a"}}),
+        )
+    });
+    entered.recv_timeout(Duration::from_secs(2)).unwrap();
+    let second = execute(
+        &json!("start-single-b"),
+        &json!({"version":1,"command":{"action":"start","preview_id":preview_id,"session_id":"single-use-b"}}),
+    )
+    .unwrap_err();
+    assert!(second.message.contains("already started"));
+    execute(
+        &json!("stop-single-a"),
+        &json!({"version":1,"command":{"action":"stop","session_id":"single-use-a"}}),
+    )
+    .unwrap();
+    release.send(()).unwrap();
+    let _ = first.join();
+}
+
+#[test]
+fn cancelling_a_read_only_request_does_not_stop_the_session() {
+    let request_id = json!(4343);
+    let session_id = "cancel-readonly";
+    {
+        let mut registry = registry().lock().unwrap();
+        registry
+            .pending_starts
+            .insert(session_id.into(), Arc::new(AtomicBool::new(false)));
+        registry.requests.insert(
+            request_id.to_string(),
+            Request {
+                cancelled: Arc::new(AtomicBool::new(false)),
+                session: Some(session_id.into()),
+                interrupts: false,
+            },
+        );
+    }
+    cancel_request(&request_id);
+    let mut registry = registry().lock().unwrap();
+    assert!(!registry
+        .pending_starts
+        .get(session_id)
+        .unwrap()
+        .load(Ordering::Acquire));
+    registry.pending_starts.remove(session_id);
+    registry.requests.remove(&request_id.to_string());
 }

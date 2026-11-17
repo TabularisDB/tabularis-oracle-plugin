@@ -8,7 +8,7 @@ use crate::{
     models::{inner_params, ConnectionParams},
 };
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex, OnceLock,
@@ -34,12 +34,17 @@ fn text<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
 struct Request {
     cancelled: Arc<AtomicBool>,
     session: Option<String>,
+    /// Only requests that run or start the target interrupt it when cancelled;
+    /// a cancelled status/read request must not stop the whole session.
+    interrupts: bool,
 }
 #[derive(Default)]
 struct Registry {
     previews: HashMap<String, (Instant, metadata::Preview)>,
     sessions: HashMap<String, Arc<session::Session>>,
-    started: HashSet<String>,
+    /// Started session identities with reservation time; never replayed while
+    /// live, pruned after an hour once their session is gone.
+    started: HashMap<String, Instant>,
     pending_starts: HashMap<String, Arc<AtomicBool>>,
     requests: HashMap<String, Request>,
 }
@@ -67,6 +72,10 @@ pub fn begin_request(id: &Value, params: &Value) -> Result<RequestTicket> {
         Request {
             cancelled: Arc::new(AtomicBool::new(false)),
             session: params["command"]["session_id"].as_str().map(str::to_string),
+            interrupts: matches!(
+                params["command"]["action"].as_str(),
+                Some("start" | "continue" | "step")
+            ),
         },
     );
     Ok(RequestTicket(id))
@@ -76,6 +85,9 @@ pub fn cancel_request(id: &Value) {
         let registry = registry().lock().unwrap();
         registry.requests.get(&id.to_string()).and_then(|request| {
             request.cancelled.store(true, Ordering::Release);
+            if !request.interrupts {
+                return None;
+            }
             let session_id = request.session.as_ref()?;
             if let Some(pending) = registry.pending_starts.get(session_id) {
                 pending.store(true, Ordering::Release);
@@ -257,7 +269,18 @@ fn execute(id: &Value, params: &Value) -> Result<Value> {
                 drop(registry);
                 return existing.command(&json!({"action":"status"}));
             }
-            if registry.started.len() >= 1024 || registry.started.contains(session_id) {
+            let Registry {
+                started,
+                sessions,
+                pending_starts,
+                ..
+            } = &mut *registry;
+            started.retain(|id, reserved| {
+                reserved.elapsed() < Duration::from_secs(3600)
+                    || sessions.contains_key(id)
+                    || pending_starts.contains_key(id)
+            });
+            if registry.started.len() >= 1024 || registry.started.contains_key(session_id) {
                 return Err(invalid(
                     "Session identity was already started; execution is never replayed",
                 ));
@@ -266,16 +289,19 @@ fn execute(id: &Value, params: &Value) -> Result<Value> {
             if registry.sessions.values().filter(|s| !s.released()).count() >= 16 {
                 return Err(invalid("Too many active Oracle debugger sessions"));
             }
+            // A preview is single-use: consuming it prevents running the same
+            // routine/arguments again under a different session identity.
             let (created, preview) = registry
                 .previews
-                .get(preview_id)
-                .ok_or_else(|| invalid("Debugger preview expired or not found"))?;
+                .remove(preview_id)
+                .ok_or_else(|| invalid("Debugger preview expired, already started or not found"))?;
             if created.elapsed() >= Duration::from_secs(300) {
                 return Err(invalid("Debugger preview expired"));
             }
-            let preview = preview.clone();
             // Reserve before connection setup: failed starts are never replayed.
-            registry.started.insert(session_id.to_string());
+            registry
+                .started
+                .insert(session_id.to_string(), Instant::now());
             registry
                 .pending_starts
                 .insert(session_id.to_string(), Arc::new(AtomicBool::new(false)));
@@ -323,11 +349,28 @@ fn execute(id: &Value, params: &Value) -> Result<Value> {
         } else if action == "stop" {
             if let Some(pending) = registry.pending_starts.get(session_id) {
                 pending.store(true, Ordering::Release);
-            } else if !registry.started.contains(session_id) {
+                // Preparation still owns its connections; they are released when
+                // it observes the stop, so do not claim release yet.
+                let mut response = cancelled_session(session_id);
+                response["session"]["resources"] = json!("unknown");
+                response["session"]["error"] = json!("Stop requested during preparation; connections are released once preparation observes it. Poll status to confirm");
+                return Ok(response);
+            } else if !registry.started.contains_key(session_id) {
                 // A never-started preview uses its native preview identity for stop.
                 registry.previews.remove(session_id);
             }
             return Ok(cancelled_session(session_id));
+        } else if action == "status" && registry.started.contains_key(session_id) {
+            // Started but never registered: preparation was stopped/failed.
+            let mut response = cancelled_session(session_id);
+            match registry.pending_starts.get(session_id) {
+                Some(stopped) if !stopped.load(Ordering::Acquire) => {
+                    return Err(invalid("Debug session is still being prepared"));
+                }
+                Some(_) => response["session"]["resources"] = json!("unknown"),
+                None => {}
+            }
+            return Ok(response);
         } else {
             return Err(invalid("Native debug session not found"));
         }

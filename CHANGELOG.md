@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Native PL/SQL routine debugging through the optional `routine_debug: 1`
+  capability (DBMS_DEBUG): explicit start at the routine entry, breakpoints,
+  step into/over/out, stack, scalar variables, OUT/return values, Stop and
+  rollback of uncommitted work. Standalone scalar procedures and functions
+  only; validated on Oracle 23ai and 26ai.
+
+### Changed
+
+- stdin is read on its own thread. `cancel` and `routine_debug` requests are
+  handled immediately; ordinary requests run in order on one worker thread, so
+  a query waiting on a lock held by a paused debug target no longer blocks
+  Stop.
+
 ## [0.1.1] - 2026-10-23
 
 ### Fixed

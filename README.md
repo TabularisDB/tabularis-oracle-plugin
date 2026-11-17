@@ -221,13 +221,18 @@ debugger RPC. It requires a Tabularis build with routine-debugger support;
 older hosts ignore the capability. Normal SQL/query connections are unaffected.
 
 The first supported targets are standalone procedures and functions with scalar
-NUMBER/character IN, INOUT, OUT and return values on Oracle 19c+ installations
-where DBMS_DEBUG is available. Packaged overloads, collections, objects, dates
+NUMBER/character IN, INOUT, OUT and return values where DBMS_DEBUG is available.
+It has been validated on Oracle 23ai and 26ai; DBMS_DEBUG also exists on 19c,
+but that version is untested. Packaged overloads, collections, objects, dates
 and variable assignments are outside this first implementation and fail with an
 explanation during preview. Variable watches accept scalar identifiers only.
 
 The routine must already be valid and compiled with debug information. The
-account needs DEBUG CONNECT SESSION plus EXECUTE/DEBUG access to the target.
+account needs DEBUG CONNECT SESSION, EXECUTE on the target and DEBUG access to
+it: it owns the routine, holds the object DEBUG privilege, or has DEBUG ANY
+PROCEDURE. Preview refuses targets without DEBUG access, because Oracle would
+run them to completion without ever stopping; as a backstop, Start aborts if no
+native breakpoint can be armed in the target.
 The debugger never grants privileges, compiles routines or installs helpers.
 Oracle deprecates [DBMS_DEBUG](https://docs.oracle.com/en/database/oracle/oracle-database/19/arpls/DBMS_DEBUG.html);
 deployment policies may disable it. No inbound JDWP port or Java debugger is used.
@@ -236,8 +241,12 @@ Start is explicit and stops at the selected routine entry. Dedicated target and
 controller connections keep step, breakpoints, stack, scalar watches and stop
 separate from the ordinary autocommit cache. Inputs are bound values. Starts are
 deduplicated, including failed/uncertain starts; changing source requires a new
-preview. Stop, RPC cancellation, stdin EOF and a 120-second abandoned-session
-lease interrupt execution and release both connections. Native target timeouts
+preview, and a preview starts at most once. Stop, RPC cancellation of a
+start/continue/step, stdin EOF and an abandoned-session lease (120 seconds
+while running, 30 minutes while paused at a stop)
+interrupt execution and release both connections. Ordinary SQL requests run on
+a separate sequential worker, so a query blocked on a row lock held by a paused
+target never delays Stop. Native target timeouts
 use abort-on-timeout, never resume-on-timeout.
 
 Execution, transaction outcome and resource release are reported independently.

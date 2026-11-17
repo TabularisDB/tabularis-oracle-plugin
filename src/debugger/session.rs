@@ -10,6 +10,10 @@ use std::time::{Duration, Instant};
 use super::metadata::{self, Preview};
 use super::{available, invalid, text, unavailable, Result};
 
+const CALL_TIMEOUT: Duration = Duration::from_secs(15);
+const IDLE_LEASE: Duration = Duration::from_secs(120);
+const PAUSED_LEASE: Duration = Duration::from_secs(30 * 60);
+
 struct Completion {
     execution: &'static str,
     outputs: Value,
@@ -23,6 +27,9 @@ struct Control {
     breakpoints: Vec<(i64, Value)>,
     stop_serial: u64,
     entered: bool,
+    /// Native breakpoint installed in the target at the first wrapper stop.
+    entry_breakpoint: Option<i64>,
+    armed: bool,
     target_closed: bool,
 }
 
@@ -48,7 +55,8 @@ pub fn connect(params: &crate::models::ConnectionParams) -> Result<Connection> {
         crate::client::connect_string(params)?,
     )?;
     connection.set_autocommit(false);
-    connection.set_call_timeout(Some(Duration::from_secs(3)))?;
+    // Generous: DBMS_DEBUG.INITIALIZE and first calls are slow on cold databases.
+    connection.set_call_timeout(Some(CALL_TIMEOUT))?;
     Ok(connection)
 }
 
@@ -81,7 +89,7 @@ impl Session {
             "BEGIN DBMS_SESSION.SET_IDENTIFIER(:id); END;",
             &[&format!("tabularis-debug:{id}:control")],
         )?;
-        controller.execute("DECLARE n PLS_INTEGER; BEGIN n:=DBMS_DEBUG.SET_TIMEOUT(1); DBMS_DEBUG.ATTACH_SESSION(:id); END;", &[&native_id])?;
+        controller.execute("DECLARE n PLS_INTEGER; BEGIN n:=DBMS_DEBUG.SET_TIMEOUT(2); DBMS_DEBUG.ATTACH_SESSION(:id); END;", &[&native_id])?;
         target.execute("BEGIN DBMS_DEBUG.DEBUG_ON; END;", &[])?;
         // The target call can wait at a breakpoint; cancellation uses OCI break plus
         // DBMS_DEBUG.ABORT_EXECUTION from the separate controller connection.
@@ -151,6 +159,8 @@ impl Session {
                 breakpoints: vec![],
                 stop_serial: 0,
                 entered: false,
+                entry_breakpoint: None,
+                armed: false,
                 target_closed: false,
             }),
             touched: Mutex::new(Instant::now()),
@@ -165,9 +175,23 @@ impl Session {
         }
     }
 
+    /// Abandoned-session lease. A session paused at a stop belongs to a user who
+    /// may be reading code, so it gets a long lease; a running one that nobody
+    /// polls is reclaimed quickly. Host EOF still releases everything at once.
     pub fn expired(&self) -> bool {
-        !self.released.load(Ordering::Acquire)
-            && self.touched.lock().unwrap().elapsed() > Duration::from_secs(120)
+        if self.released.load(Ordering::Acquire) {
+            return false;
+        }
+        let Ok(control) = self.control.try_lock() else {
+            return false; // a command is in progress
+        };
+        let lease = if control.snapshot["execution"] == "paused" {
+            PAUSED_LEASE
+        } else {
+            IDLE_LEASE
+        };
+        drop(control);
+        self.touched.lock().unwrap().elapsed() > lease
     }
     pub fn finished(&self) -> bool {
         self.finished.load(Ordering::Acquire)
@@ -192,14 +216,33 @@ impl Session {
             if self.finished() {
                 return Ok(());
             }
-            if control.snapshot["execution"] == "paused"
-                && control.snapshot["source"] == self.preview.source
-            {
+            let paused = control.snapshot["execution"] == "paused";
+            if paused && control.snapshot["source"] == self.preview.source {
                 control.entered = true;
+                if let Some(id) = control.entry_breakpoint.take() {
+                    if let Some(connection) = control.connection.as_ref() {
+                        let _ = delete_breakpoint(connection, id);
+                    }
+                }
                 return Ok(());
             }
-            let flags = if control.snapshot["execution"] == "paused" {
-                Some("DBMS_DEBUG.BREAK_ANY_CALL + DBMS_DEBUG.BREAK_EXCEPTION")
+            if paused && control.armed {
+                return Err(self.abort(
+                    control,
+                    "Execution stopped outside the selected routine before reaching its entry; execution was aborted",
+                ));
+            }
+            let flags = if paused {
+                // First wrapper stop: arm a native breakpoint inside the target so
+                // execution can never run through it unobserved.
+                if let Err(error) = install_entry_breakpoint(control, &self.preview) {
+                    return Err(self.abort(
+                        control,
+                        &format!("Could not install a native breakpoint in the selected routine ({}); check the DEBUG privilege. Execution was aborted", error.message),
+                    ));
+                }
+                control.armed = true;
+                Some("DBMS_DEBUG.BREAK_EXCEPTION")
             } else {
                 None
             };
@@ -267,6 +310,13 @@ impl Session {
     }
 
     pub fn stop(&self) -> Result<Value> {
+        self.request_cancel();
+        let mut control = self.control.lock().unwrap();
+        self.stop_locked(&mut control);
+        Ok(response(&mut control))
+    }
+
+    fn request_cancel(&self) {
         self.cancel.store(true, Ordering::Release);
         if let Some(sender) = self.activation.lock().unwrap().take() {
             let _ = sender.send(false);
@@ -274,13 +324,24 @@ impl Session {
         if !self.finished() {
             let _ = self.target.break_execution();
         }
-        let mut control = self.control.lock().unwrap();
-        self.finish(&mut control, Duration::ZERO);
+    }
+
+    /// Abort the target while already holding the control lock; returns the
+    /// error to surface. The session snapshot records the outcome.
+    fn abort(&self, control: &mut Control, message: &str) -> crate::error::PluginError {
+        self.request_cancel();
+        self.stop_locked(control);
+        control.snapshot["error"] = json!(message);
+        invalid(message)
+    }
+
+    fn stop_locked(&self, control: &mut Control) {
+        self.finish(control, Duration::ZERO);
         if !self.finished() {
             if control.connection.is_some() {
-                let _ = event(&mut control, Some("DBMS_DEBUG.ABORT_EXECUTION"));
+                let _ = event(control, Some("DBMS_DEBUG.ABORT_EXECUTION"));
             }
-            self.finish(&mut control, Duration::from_secs(2));
+            self.finish(control, Duration::from_secs(2));
         }
         if !self.finished() {
             control.snapshot["execution"] = json!("unknown");
@@ -291,9 +352,8 @@ impl Session {
             stale(&mut control.snapshot["stack"]);
             stale(&mut control.snapshot["variables"]);
         } else if !self.released() {
-            self.release_completed(&mut control);
+            self.release_completed(control);
         }
-        Ok(response(&mut control))
     }
 
     fn finish(&self, control: &mut Control, wait: Duration) {
@@ -645,4 +705,49 @@ fn read_variables(control: &mut Control, preview: &Preview, command: &Value) -> 
         available(json!(values))
     };
     Ok(())
+}
+
+fn delete_breakpoint(connection: &Connection, id: i64) -> Result<()> {
+    let result = connection.execute(
+        "BEGIN :code:=DBMS_DEBUG.DELETE_BREAKPOINT(:id); END;",
+        &[&OracleType::Number(10, 0), &id],
+    )?;
+    let code: i64 = result.bind_value("code")?;
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(invalid(format!("Native breakpoint status {code}")))
+    }
+}
+
+/// Arm a native breakpoint on the first executable line of the target. Oracle
+/// rejects non-executable lines with ERROR_ILLEGAL_LINE, so walk forward until a
+/// line is accepted; any other status (missing DEBUG access, no debug info)
+/// means the target cannot be stopped and is fatal.
+fn install_entry_breakpoint(control: &mut Control, preview: &Preview) -> Result<()> {
+    let connection = control
+        .connection
+        .as_ref()
+        .ok_or_else(|| invalid("Native debugger resources have been released"))?;
+    let owner = text(&preview.target, "schema")?;
+    let name = text(&preview.target, "name")?;
+    let lines = preview.source["value"]["text"]
+        .as_str()
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
+        .clamp(1, 100_000) as i64;
+    for line in 1..=lines {
+        let result = connection.execute_named("DECLARE p DBMS_DEBUG.PROGRAM_INFO; BEGIN p.owner:=:owner; p.name:=:name; p.namespace:=DBMS_DEBUG.NAMESPACE_PKGSPEC_OR_TOPLEVEL; :code:=DBMS_DEBUG.SET_BREAKPOINT(p,:line,:bp); :illegal:=CASE WHEN :code=DBMS_DEBUG.ERROR_ILLEGAL_LINE THEN 1 ELSE 0 END; END;",
+            &[("owner", &owner), ("name", &name), ("line", &line),
+                ("code", &OracleType::Number(10,0)), ("bp", &OracleType::Number(10,0)), ("illegal", &OracleType::Number(10,0))])?;
+        let code: i64 = result.bind_value("code")?;
+        if code == 0 {
+            control.entry_breakpoint = Some(result.bind_value("bp")?);
+            return Ok(());
+        }
+        if result.bind_value::<_, i64>("illegal")? != 1 {
+            return Err(invalid(format!("native breakpoint status {code}")));
+        }
+    }
+    Err(invalid("no executable line accepted a native breakpoint"))
 }

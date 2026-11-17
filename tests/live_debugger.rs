@@ -116,6 +116,17 @@ impl Plugin {
         );
         result
     }
+    /// A slow database can answer `continue` with `running`; poll status until
+    /// the next native stop (or end) instead of asserting on the first reply.
+    fn settle(&mut self, id: &str, mut result: Value) -> Value {
+        for _ in 0..30 {
+            if result["session"]["execution"] != "running" {
+                break;
+            }
+            result = self.debug(json!({"action":"status","session_id":id}));
+        }
+        result
+    }
     fn complete(&mut self, id: &str) -> Value {
         let mut result = self.debug(json!({"action":"status","session_id":id}));
         for _ in 0..40 {
@@ -211,11 +222,35 @@ impl Fixture {
                 &[],
             )
             .unwrap();
+        connection
+            .execute(
+                "CREATE TABLE DEBUG_LOCKS(id NUMBER PRIMARY KEY, n NUMBER)",
+                &[],
+            )
+            .unwrap();
+        connection
+            .execute("INSERT INTO DEBUG_LOCKS VALUES(1, 0)", &[])
+            .unwrap();
+        connection.commit().unwrap();
+        connection
+            .execute(
+                "CREATE OR REPLACE PROCEDURE DBG_LOCK AS\nBEGIN\nUPDATE DEBUG_LOCKS SET n = n + 1 WHERE id = 1;\nNULL;\nEND;",
+                &[],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "CREATE OR REPLACE PROCEDURE DBG_COMMIT AS\nBEGIN\nINSERT INTO DEBUG_EFFECTS VALUES(7);\nCOMMIT;\nEND;",
+                &[],
+            )
+            .unwrap();
         for (name, kind) in [
             ("DBG_SAMPLE", "PROCEDURE"),
             ("DBG_FAIL", "PROCEDURE"),
             ("DBG_FUNC", "FUNCTION"),
             ("DBG_SPIN", "PROCEDURE"),
+            ("DBG_LOCK", "PROCEDURE"),
+            ("DBG_COMMIT", "PROCEDURE"),
         ] {
             connection
                 .execute(&format!("ALTER {kind} {name} COMPILE DEBUG"), &[])
@@ -313,6 +348,7 @@ fn real_debugger_breakpoints_values_exceptions_and_cleanup() {
         bp["session"]["breakpoints"]["value"]
     );
     let stopped = plugin.debug(json!({"action":"continue","session_id":id}));
+    let stopped = plugin.settle(id, stopped);
     assert_eq!(stopped["session"]["stop"]["value"]["line"], 6);
     let stack = plugin.debug(json!({"action":"read_stack","session_id":id}));
     let frames = stack["session"]["stack"]["value"].as_array().unwrap();
@@ -466,4 +502,130 @@ fn real_debugger_breakpoints_values_exceptions_and_cleanup() {
     fixture.no_sessions("eof");
     fixture.unchanged();
     eprintln!("PASS: routine, exception, scalar OUT/return, all step modes, native breakpoints/variables, stop, concurrent cancellation, EOF, rollback and target/controller cleanup");
+}
+
+#[test]
+fn real_debugger_stop_is_not_blocked_by_a_query_waiting_on_the_target_lock() {
+    let Some(fixture) = Fixture::new() else {
+        eprintln!("SKIPPED native Oracle evidence: ORACLE_TEST_HOST is unset");
+        return;
+    };
+    let mut plugin = Plugin::new(fixture.params.clone());
+    let start = plugin.start("DBG_LOCK", "lock", json!([]));
+    let source = start["session"]["source"]["value"]["source_id"].clone();
+    plugin.debug(json!({"action":"set_breakpoints","session_id":"lock","breakpoints":[{"source_id":source,"line":4}]}));
+    let paused = plugin.debug(json!({"action":"continue","session_id":"lock"}));
+    let paused = plugin.settle("lock", paused);
+    assert_eq!(
+        paused["session"]["stop"]["value"]["line"], 4,
+        "target must hold the row lock: {paused}"
+    );
+    // The ordinary query blocks on the row lock held by the paused target.
+    let query = plugin.send(
+        "execute_query",
+        json!({"params":plugin.params,"query":"UPDATE DEBUG_LOCKS SET n = n + 10 WHERE id = 1"}),
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    let began = Instant::now();
+    let stop = plugin.send(
+        "routine_debug",
+        json!({"params":plugin.params,"version":1,"command":{"action":"stop","session_id":"lock"}}),
+    );
+    let stopped = plugin.reply(stop);
+    assert!(
+        began.elapsed() < Duration::from_secs(5),
+        "Stop must not wait behind a blocked ordinary query ({:?})",
+        began.elapsed()
+    );
+    assert_eq!(stopped["result"]["session"]["execution"], "cancelled");
+    assert_eq!(stopped["result"]["session"]["resources"], "released");
+    // Rolling back the target releases the lock, so the queued query completes.
+    let query = plugin.reply(query);
+    assert!(query.get("error").is_none(), "queued query failed: {query}");
+    fixture.no_sessions("lock");
+}
+
+#[test]
+fn real_debugger_refuses_routines_without_debug_access() {
+    let Some(fixture) = Fixture::new() else {
+        eprintln!("SKIPPED native Oracle evidence: ORACLE_TEST_HOST is unset");
+        return;
+    };
+    let other = format!("{}_X", fixture.user);
+    fixture
+        .admin
+        .execute(
+            &format!("CREATE USER {other} IDENTIFIED BY TestOnly123"),
+            &[],
+        )
+        .unwrap();
+    struct DropUser<'a>(&'a Connection, &'a str);
+    impl Drop for DropUser<'_> {
+        fn drop(&mut self) {
+            let _ = self
+                .0
+                .execute(&format!("DROP USER {} CASCADE", self.1), &[]);
+        }
+    }
+    let _cleanup = DropUser(&fixture.admin, &other);
+    fixture
+        .admin
+        .execute(
+            &format!("GRANT CREATE SESSION, DEBUG CONNECT SESSION TO {other}"),
+            &[],
+        )
+        .unwrap();
+    fixture
+        .connection
+        .execute(&format!("GRANT EXECUTE ON DBG_COMMIT TO {other}"), &[])
+        .unwrap();
+    let mut params = fixture.params.clone();
+    params["username"] = json!(other);
+    let target = json!({"database":params["database"],"schema":fixture.user,"name":"DBG_COMMIT","routine_type":"PROCEDURE","identity_args":""});
+    {
+        let mut plugin = Plugin::new(params.clone());
+        let denied = plugin.debug_raw(json!({"action":"preview","target":target,"arguments":[]}));
+        assert!(
+            denied["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("Missing DEBUG privilege")),
+            "EXECUTE without DEBUG must be refused before anything runs: {denied}"
+        );
+        let missing = plugin.debug_raw(json!({"action":"preview","target":{"database":params["database"],"schema":fixture.user,"name":"DBG_ABSENT","routine_type":"PROCEDURE","identity_args":""},"arguments":[]}));
+        assert!(
+            missing["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("was not found")),
+            "missing routines need a clear message: {missing}"
+        );
+    }
+    fixture.unchanged();
+
+    fixture
+        .connection
+        .execute(&format!("GRANT DEBUG ON DBG_COMMIT TO {other}"), &[])
+        .unwrap();
+    let mut plugin = Plugin::new(params.clone());
+    let preview = plugin.debug(json!({"action":"preview","target":target,"arguments":[]}));
+    let started = plugin.debug(
+        json!({"action":"start","preview_id":preview["preview_id"],"session_id":"nonowner"}),
+    );
+    let started = plugin.settle("nonowner", started);
+    assert_eq!(
+        started["session"]["execution"], "paused",
+        "a non-owner with DEBUG must stop at entry: {started}"
+    );
+    assert_eq!(started["session"]["source"], preview["source"]);
+    let reused = plugin.debug_raw(
+        json!({"action":"start","preview_id":preview["preview_id"],"session_id":"nonowner-again"}),
+    );
+    assert!(
+        reused.get("error").is_some(),
+        "a preview starts at most once"
+    );
+    let stopped = plugin.debug(json!({"action":"stop","session_id":"nonowner"}));
+    assert_eq!(stopped["session"]["execution"], "cancelled");
+    assert_eq!(stopped["session"]["resources"], "released");
+    drop(plugin);
+    fixture.unchanged();
 }
